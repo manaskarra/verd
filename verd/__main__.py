@@ -1,12 +1,16 @@
 import argparse
 import asyncio
 import json
+import logging
 import sys
 
-from verd.config import VERSION
+from verd.config import VERSION, DEBATER_MAX_TOKENS, MODEL_PRICING
 from verd.context import build_context
 from verd.engine import run_debate
+from verd.log import setup as setup_logging
+from verd.models import MODELS
 from verd.output import print_result, StatusDisplay
+from verd.user_config import load_user_config, apply_config_to_args
 
 
 def make_parser():
@@ -55,7 +59,18 @@ def make_parser():
         help="Glob patterns to exclude (e.g. --exclude 'test_*' '*.spec.*')",
     )
 
-    # Output
+    # Model overrides
+    overrides = parser.add_argument_group("model overrides")
+    overrides.add_argument(
+        "--judge", metavar="MODEL",
+        help="Override judge model (e.g. --judge gpt-5.4)",
+    )
+    overrides.add_argument(
+        "--debaters", metavar="MODEL", nargs="+",
+        help="Override debater models (e.g. --debaters gpt-4.1 claude-sonnet-4-6)",
+    )
+
+    # Output & safety
     parser.add_argument(
         "-q", "--quiet", action="store_true",
         help="Hide debate transcript, show only verdict",
@@ -68,17 +83,78 @@ def make_parser():
         "--timeout", type=int, default=None,
         help="Override timeout per model call (seconds)",
     )
+    parser.add_argument(
+        "--budget", type=float, default=None, metavar="USD",
+        help="Max cost in USD — aborts before running if estimated cost exceeds budget",
+    )
     return parser
+
+
+def _estimate_debate_cost(mode: str) -> float:
+    """Rough upper-bound cost estimate for a debate run."""
+    cfg = MODELS[mode]
+    num_debaters = len(cfg["debaters"])
+    rounds = cfg["rounds"]
+    tokens_per_call = DEBATER_MAX_TOKENS[mode]
+    # Estimate: each call uses ~2x debater tokens (prompt + completion)
+    # rounds+1 because round 0 + N follow-ups, plus judge
+    total_calls = num_debaters * (rounds + 1) + 1
+    # Use average pricing as rough estimate
+    avg_input = sum(p[0] for p in MODEL_PRICING.values()) / len(MODEL_PRICING)
+    avg_output = sum(p[1] for p in MODEL_PRICING.values()) / len(MODEL_PRICING)
+    est = total_calls * (tokens_per_call * avg_input + tokens_per_call * avg_output) / 1_000_000
+    return round(est, 2)
+
+
+def _apply_model_overrides(mode: str, args) -> None:
+    """Apply --judge and --debaters overrides to the MODELS config in-place."""
+    cfg = MODELS[mode]
+    if args.judge:
+        cfg["judge"] = args.judge
+    if args.debaters:
+        roles = list(MODELS[mode]["debaters"][i].get("role", "analyst")
+                     for i in range(len(args.debaters)))
+        # Pad roles if more debaters than original, cycle through defaults
+        from verd.models import ROLES
+        default_roles = list(ROLES.keys())
+        while len(roles) < len(args.debaters):
+            roles.append(default_roles[len(roles) % len(default_roles)])
+        cfg["debaters"] = [
+            {"model": m, "role": r}
+            for m, r in zip(args.debaters, roles)
+        ]
 
 
 def run(mode: str):
     parser = make_parser()
     args = parser.parse_args()
+
+    # Configure logging
+    setup_logging(logging.DEBUG if getattr(args, 'verbose', False) else logging.WARNING)
+
+    # Load user config (file + env vars), then let CLI flags override
+    user_cfg = load_user_config()
+    apply_config_to_args(args, user_cfg)
+
     content, claim, files = build_context(args)
 
     if not content and not claim:
         parser.print_help()
         sys.exit(1)
+
+    # Apply model overrides before anything else
+    _apply_model_overrides(mode, args)
+
+    # Cost guardrail
+    if args.budget is not None:
+        est = _estimate_debate_cost(mode)
+        if est > args.budget:
+            print(
+                f"Estimated cost ~${est:.2f} exceeds budget ${args.budget:.2f}. "
+                f"Use a lighter mode (verdl/verd) or increase --budget.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # --all flag: skip smart file selection, send everything
     if getattr(args, 'all', False) and files is not None:

@@ -1,15 +1,17 @@
 """Debate engine — orchestrates multi-model debate and judge synthesis."""
 
 import asyncio
-import sys
+import logging
 import time
 
 from verd.config import get_client, DEBATER_MAX_TOKENS, TIMEOUTS, estimate_cost
 from verd.context import files_to_content
-from verd.models import MODELS, MODEL_PARAMS, ROLES
+from verd.models import MODELS, MODEL_PARAMS, MODEL_CONTEXT_WINDOWS, ROLES
 from verd.judge import run_judge
 from verd.output import print_round
 from verd.selector import select_relevant_files
+
+log = logging.getLogger("verd.engine")
 
 
 # --- Model calling with retry ---
@@ -52,14 +54,40 @@ async def call_model(
                 return text.strip(), usage
             last_error = ValueError(f"{model} returned empty response")
         except Exception as e:
+            # Surface model-not-found errors immediately instead of retrying
+            err_str = str(e).lower()
+            if any(s in err_str for s in ("not found", "does not exist", "invalid model", "no endpoints")):
+                raise ValueError(
+                    f"Model '{model}' not found. Check that your OPENAI_BASE_URL provider "
+                    f"supports this model, or customize models in verd/models.py. "
+                    f"Original error: {e}"
+                ) from e
             last_error = e
 
         if attempt < MAX_RETRIES - 1:
             delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-            print(f"⚠ {model} failed (attempt {attempt+1}/{MAX_RETRIES}), retrying in {delay}s", file=sys.stderr)
+            log.warning("%s failed (attempt %d/%d), retrying in %ds", model, attempt + 1, MAX_RETRIES, delay)
             await asyncio.sleep(delay)
 
     raise last_error or ValueError(f"{model} failed after {MAX_RETRIES} attempts")
+
+
+# --- Response validation ---
+
+_MIN_RESPONSE_LENGTH = 20
+_MAX_RESPONSE_LENGTH = 50_000
+
+
+def _validate_response(model: str, text: str) -> str | None:
+    """Validate a debater response. Returns cleaned text or None if unusable."""
+    if not text or len(text.strip()) < _MIN_RESPONSE_LENGTH:
+        log.warning("%s returned too-short response (%d chars), dropping", model, len(text or ""))
+        return None
+    text = text.strip()
+    if len(text) > _MAX_RESPONSE_LENGTH:
+        log.warning("%s response truncated from %d to %d chars", model, len(text), _MAX_RESPONSE_LENGTH)
+        text = text[:_MAX_RESPONSE_LENGTH] + "\n[response truncated]"
+    return text
 
 
 # --- Question detection ---
@@ -219,6 +247,24 @@ def _calculate_confidence(result: dict, debater_roles: dict[str, str]) -> float:
 
 # --- Round execution ---
 
+def _cap_content_for_model(content: str, model: str, max_output_tokens: int) -> str:
+    """Truncate content to fit within a model's context window.
+
+    Reserves space for prompt overhead (~2K tokens) and output tokens.
+    """
+    ctx_window = MODEL_CONTEXT_WINDOWS.get(model, 200_000)
+    # Reasoning models (deepseek-r1, o3, etc.) use context for chain-of-thought
+    reasoning_models = {"deepseek-r1", "o3", "o4-mini"}
+    reasoning_reserve = 30_000 if model in reasoning_models else 0
+    # Reserve tokens for: prompt template (~2K) + output + reasoning overhead
+    usable_tokens = ctx_window - max_output_tokens - 4_000 - reasoning_reserve
+    # Rough chars-per-token estimate (conservative: 3 chars/token)
+    max_chars = max(usable_tokens * 3, 10_000)
+    if len(content) <= max_chars:
+        return content
+    return content[:max_chars] + f"\n[... content truncated to fit {model} context window]"
+
+
 async def _run_round0(debaters, content, claim, debater_roles, debater_tokens, timeout):
     """Run initial round — all models in parallel with role-specific prompts."""
     def get_role_desc(model):
@@ -228,18 +274,27 @@ async def _run_round0(debaters, content, claim, debater_roles, debater_tokens, t
     results = await asyncio.gather(
         *[call_model(
             m,
-            [{"role": "user", "content": _build_round0_prompt(content, claim, get_role_desc(m))}],
+            [{"role": "user", "content": _build_round0_prompt(
+                _cap_content_for_model(content, m, debater_tokens), claim, get_role_desc(m)
+            )}],
             max_tokens=debater_tokens,
             timeout=timeout,
         ) for m in debaters],
         return_exceptions=True,
     )
 
-    valid = [(m, r) for m, r in zip(debaters, results) if not isinstance(r, Exception)]
-    failed = [(m, r) for m, r in zip(debaters, results) if isinstance(r, Exception)]
+    valid = []
+    for m, r in zip(debaters, results):
+        if isinstance(r, Exception):
+            log.warning("%s failed: %s", m, r)
+        else:
+            text, usage = r
+            cleaned = _validate_response(m, text)
+            if cleaned is not None:
+                valid.append((m, (cleaned, usage)))
+            else:
+                log.warning("%s returned unusable response, dropping", m)
 
-    for m, e in failed:
-        print(f"⚠ {m} failed: {e}", file=sys.stderr)
     if len(valid) < 1:
         raise RuntimeError("No models responded. Check your API key and model availability.")
 
@@ -270,25 +325,31 @@ async def _run_followup_round(
     round_entries = []
     for m, r in zip(valid_models, results):
         if isinstance(r, Exception):
-            print(f"⚠ {m} failed in round {round_num}", file=sys.stderr)
+            log.warning("%s failed in round %d: %s", m, round_num, r)
         else:
             text, usage = r
-            entry = {"round": round_num, "model": m, "role": debater_roles.get(m), "response": text}
-            round_entries.append(entry)
-            round_valid.append((m, usage))
+            cleaned = _validate_response(m, text)
+            if cleaned is not None:
+                entry = {"round": round_num, "model": m, "role": debater_roles.get(m), "response": cleaned}
+                round_entries.append(entry)
+                round_valid.append((m, usage))
+            else:
+                log.warning("%s returned unusable response in round %d, dropping", m, round_num)
 
     return round_valid, round_entries
 
 
 async def _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status, mode=None):
-    """Run judge with fallback chain."""
+    """Run judge with retry on primary, then fallback chain."""
     FALLBACK_JUDGES = ["claude-sonnet-4-6", "gpt-5.4", "gpt-4.1"]
     judge_timeout = max(timeout, 90)
 
     status(f"{judge_model} delivering verdict")
 
+    # Try primary judge twice before falling back
     judges_tried = [judge_model]
-    for attempt_judge in [judge_model] + [j for j in FALLBACK_JUDGES if j != judge_model]:
+    judge_sequence = [judge_model, judge_model] + [j for j in FALLBACK_JUDGES if j != judge_model]
+    for i, attempt_judge in enumerate(judge_sequence):
         try:
             result, judge_usage = await run_judge(
                 attempt_judge, content, claim, transcript, judge_timeout,
@@ -296,13 +357,18 @@ async def _run_judge(judge_model, content, claim, transcript, timeout, debater_r
             )
             track_usage(attempt_judge, judge_usage)
             if attempt_judge != judge_model:
-                print(f"⚠ primary judge ({judge_model}) failed, used {attempt_judge}", file=sys.stderr)
+                log.warning("primary judge (%s) failed, used %s", judge_model, attempt_judge)
+            elif i == 1:
+                log.info("primary judge (%s) succeeded on retry", judge_model)
             return result
         except Exception as e:
-            print(f"⚠ judge ({attempt_judge}) failed: {e}", file=sys.stderr)
+            log.warning("judge (%s) failed: %s", attempt_judge, e)
             if attempt_judge != judge_model:
                 judges_tried.append(attempt_judge)
-            status(f"judge {attempt_judge} failed, trying fallback...")
+            if i == 0:
+                status(f"judge {attempt_judge} failed, retrying...")
+            else:
+                status(f"judge {attempt_judge} failed, trying fallback...")
 
     return {
         "verdict": "UNCERTAIN",
@@ -393,7 +459,7 @@ async def run_debate(
             track_usage(m, usage)
 
         if not round_valid:
-            print(f"⚠ No models responded in round {round_num}, stopping early.", file=sys.stderr)
+            log.warning("No models responded in round %d, stopping early.", round_num)
             break
         valid_models = [m for m, _ in round_valid]
 

@@ -11,14 +11,14 @@ VERSION = "0.2.1"
 DEBATER_MAX_TOKENS = {
     "verdl": 2048,   # fast, concise
     "verd": 4096,    # balanced
-    "verdh": 4096,   # deep analysis
+    "verdh": 8192,   # deep analysis — reasoning models need headroom for chain-of-thought
 }
 JUDGE_MAX_TOKENS = 8192
 
 TIMEOUTS = {
     "verdl": 30,
     "verd": 45,
-    "verdh": 90,
+    "verdh": 120,  # reasoning models (deepseek-r1, o3) regularly need 60-90s
 }
 
 JSON_MODE_MODELS = {

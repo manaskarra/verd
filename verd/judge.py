@@ -42,6 +42,9 @@ def _build_role_context(model_roles: dict[str, str] | None) -> str:
     return "\n".join(lines)
 
 
+MAX_JUDGE_CONTENT_CHARS = 60_000  # ~15K tokens — leave room for transcript + output
+
+
 def _build_judge_prompt(content: str, claim: str, transcript: list[dict],
                         model_roles: dict[str, str] | None = None) -> str:
     from verd.engine import _is_question
@@ -97,6 +100,8 @@ def _build_judge_prompt(content: str, claim: str, transcript: list[dict],
         "- Flag unresolved genuine disagreements vs. superficial differences in phrasing"
     ]
     if content:
+        if len(content) > MAX_JUDGE_CONTENT_CHARS:
+            content = content[:MAX_JUDGE_CONTENT_CHARS] + "\n[... content truncated for judge — debaters saw the full context]"
         parts.append(f"\nContext:\n{content}")
     parts.append(f'\nQuestion: "{claim}"')
     if role_context:

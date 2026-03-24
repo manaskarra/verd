@@ -6,3 +6,5 @@ dist/
 build/
 *.pyc
 .venv/
+blog/
+benchmark/results/

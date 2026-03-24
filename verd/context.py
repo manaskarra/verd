@@ -101,6 +101,44 @@ def _run_git(cmd: list[str]) -> str:
     return result.stdout
 
 
+def _needs_code_context(claim: str) -> bool:
+    """Detect if a claim/question likely needs code context.
+
+    Returns False for standalone questions like 'what is 1+1',
+    'explain recursion', etc. that don't reference code artifacts.
+    """
+    lower = claim.lower().strip()
+
+    # Short, simple questions are almost never about local code
+    words = lower.split()
+    if len(words) <= 4 and not any(c in lower for c in (".", "/", "_", "::")):
+        return False
+
+    # Look for code-related signals
+    code_signals = (
+        # File/path references
+        ".py", ".js", ".ts", ".go", ".rs", ".rb", ".java", ".cpp", ".c",
+        "/", "\\", ".yaml", ".yml", ".json", ".toml", ".env",
+        # Code identifiers (snake_case, camelCase, etc.)
+        "_", "::",
+        # Code review / analysis keywords
+        "bug", "issue", "error", "vulnerability", "security", "review",
+        "refactor", "test", "function", "class", "method", "variable",
+        "import", "module", "package", "dependency", "api", "endpoint",
+        "database", "schema", "migration", "deploy", "config",
+        "this code", "this file", "this project", "this repo", "codebase",
+    )
+    if any(signal in lower for signal in code_signals):
+        return True
+
+    # Check for identifiers with underscores or camelCase
+    import re
+    if re.search(r'[a-z][A-Z]|[a-z]_[a-z]', claim):
+        return True
+
+    return False
+
+
 def build_context(args) -> tuple[str, str, list[tuple[Path, str, str]] | None]:
     """Returns (content, claim, files_or_none).
 
@@ -137,8 +175,8 @@ def build_context(args) -> tuple[str, str, list[tuple[Path, str, str]] | None]:
         content = args.context
     elif not sys.stdin.isatty():
         content = sys.stdin.read()
-    else:
-        # No content flag — auto-scan current directory
+    elif _needs_code_context(args.claim):
+        # Auto-scan current directory only if claim references code
         cwd = Path(".")
         files = _collect_files(cwd, None, None)
         if files:

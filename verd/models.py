@@ -80,6 +80,21 @@ MODEL_PARAMS = {
     },
 }
 
+# Context window sizes in tokens — used to cap content for smaller models
+MODEL_CONTEXT_WINDOWS = {
+    "gpt-5-mini":               1_000_000,
+    "gpt-5.4":                  1_000_000,
+    "gpt-4.1":                  1_000_000,
+    "o3":                       200_000,
+    "o4-mini":                  200_000,
+    "claude-opus-4-6":          1_000_000,
+    "claude-sonnet-4-6":        200_000,
+    "gemini-2.5-flash":         1_000_000,
+    "gemini-3.1-pro-preview":   1_000_000,
+    "deepseek-r1":              128_000,
+    "sonar-pro":                128_000,
+}
+
 # Judge reasoning effort per tier — higher = more thorough but slower
 JUDGE_PARAMS = {
     "verdl": {"reasoning_effort": "medium"},

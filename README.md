@@ -23,64 +23,41 @@ export OPENAI_BASE_URL=https://openrouter.ai/api/v1  # or any compatible endpoin
 
 Works with [OpenRouter](https://openrouter.ai) (easiest — all models, one key), direct OpenAI, [LiteLLM proxy](https://docs.litellm.ai/), Azure, Together, Groq, etc.
 
-Edit `verd/models.py` to customize which models debate and their roles.
-
 ## Usage
 
 ```bash
-# Architecture decisions
 verd "Kafka or RabbitMQ for our event pipeline?" -f architecture.md
-
-# Security review
-verd "can this auth middleware be bypassed?" -f auth.py middleware.py routes.py
-
-# Payment logic
-verd "is this payment flow handling refunds correctly?" -d payments/ --ext .py
-
-# Full codebase audit
-verdh "full security audit" -d . -a
-
-# Quick sanity check
-verdl "is O(n^2) acceptable for n=1000?"
-
-# Pre-merge review
+verd "can this auth middleware be bypassed?" -f auth.py middleware.py
 verdh "should we merge this?" -gb main
-
-# Git diffs
-verd "do these changes break backwards compatibility?" -g     # unstaged
-verd "any correctness issues before I ship?" -gs               # staged
-
-# Pipe anything
+verdl "is O(n^2) acceptable for n=1000?"
 cat deploy.yaml | verd "any misconfigs that could expose prod?"
-
-# Quiet mode (verdict only, no transcript)
-verd "is this rate limiter safe under concurrency?" -f rate_limiter.py -q
-
-# JSON output
-verd "is this rate limiter safe under concurrency?" -f rate_limiter.py --json
 ```
 
-In Slack:
+## Output
+
 ```
-@verd should we migrate to gRPC or stick with REST?
-@verd deep is this thread's auth proposal secure?
-@verd quick is this regex correct?
-/verd should we use Kafka?
+FAIL  77%  In-memory rate limiter is unsafe for production
+
+claude:FAIL  gpt:FAIL  gemini:FAIL  gpt:FAIL  (FULL)
+
++ Conceptually correct sliding-window logic
+- Global dict is unsynchronized — race conditions in multi-thread servers
+- Per-user lists grow without bounds — memory leak / DoS vector
+! gpt-5-mini caught the risk of system clock jumps with time.time()
+→ Move state to Redis with atomic operations
+
+completed in 69.3s • 22,449 tokens • ~$0.07
 ```
 
-## When to use verd
+Vote breakdown, unique catches (`!`), dissent, strengths, issues, and actionable fixes — all in one view.
 
-**The second opinion you run before you ship.**
+## Modes
 
-- **"Should we?" decisions** — Ask one model "Kafka or RabbitMQ?" and get one opinion at 50% confidence. Ask verd and get 4-5 perspectives that challenge each other, a clear recommendation, and dissent noted. A single model never tells you when it's wrong.
-
-- **High-stakes code** — Security reviews, auth flows, payment logic. Not because verd finds more bugs — but because it catches the 5% of cases where any single model would be confidently wrong. If sonnet says "this JWT code looks fine" and it has `verify_signature: False`, verd's debate catches it.
-
-- **Defensible decisions** — "I ran this through 5 AI models and they debated for 3 rounds. 4 agreed, 1 dissented on X. Here's the full transcript." That's more defensible than "Claude said it's fine."
-
-Like a code review from 5 senior engineers that costs $0.05-$0.30. You don't use it on every line — you use it on the 3 things that matter.
-
-**Don't use verd for** simple factual questions, writing code, or anything where speed matters more than thoroughness.
+| Command | Debaters | Roles | Rounds | Speed | Cost |
+|---------|----------|-------|--------|-------|------|
+| `verdl` | 2 + judge | analyst, devils_advocate | 1 | ~15-30s | ~$0.02 |
+| `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30-60s | ~$0.15+ |
+| `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60-120s | ~$0.40+ |
 
 ## How it works
 
@@ -94,48 +71,7 @@ Like a code review from 5 senior engineers that costs $0.05-$0.30. You don't use
 
 The key insight: different models have different blind spots. Claude spots nuance GPT misses. Gemini catches logic errors DeepSeek overlooks. The debate surfaces all of them — and tells you exactly which model caught what.
 
-## Output
-
-verd shows what makes multi-model debate valuable:
-
-```
-FAIL  77%  In-memory rate limiter is unsafe for production
-
-claude:FAIL  gpt:FAIL  gemini:FAIL  gpt:FAIL  (FULL)
-
-+ Conceptually correct sliding-window logic
-+ Old timestamps pruned on every call
-
-- Global dict is unsynchronized — race conditions in multi-thread servers
-- State resets on restart, multiplied across horizontally scaled instances
-- Per-user lists grow without bounds — memory leak / DoS vector
-
-! gpt-5-mini caught the risk of system clock jumps with time.time()
-! gpt-4.1 highlighted the O(N) per-request performance cost
-
-→ Move state to Redis with atomic operations
-→ Use time.monotonic() for interval calculations
-→ Add TTL/eviction for inactive user keys
-
-completed in 69.3s • 22,449 tokens • ~$0.07
-```
-
-- **Vote breakdown** — who voted what, at a glance
-- **Unique catches** (`!`) — what each model uniquely spotted that others missed
-- **Dissent** — who disagreed, what they argued, and why it matters
-- **Confidence** — calculated from vote distribution weighted by role, not judge vibes
-
-## Modes
-
-| Command | Debaters | Roles | Rounds | Speed | Cost |
-|---------|----------|-------|--------|-------|------|
-| `verdl` | 2 + judge | analyst, devils_advocate | 1 | ~10s | ~$0.01 |
-| `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30s | ~$0.15+ |
-| `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~70s | ~$0.40+ |
-
 ## Roles
-
-Each model in the debate gets a specialized role:
 
 | Role | Job | Example catch |
 |------|-----|---------------|
@@ -147,29 +83,25 @@ Each model in the debate gets a specialized role:
 
 The judge weighs each reviewer's input by role — a fact_checker citing sources carries more weight than a devils_advocate pushing back.
 
+## Config
+
+Customize models via `~/.verd.yaml`, env vars (`VERD_JUDGE`, `VERD_DEBATERS`, `VERD_BUDGET`, `VERD_TIMEOUT`), or CLI flags. Precedence: CLI > env > file > defaults.
+
+```yaml
+# ~/.verd.yaml
+judge: gpt-5.4
+debaters: claude-sonnet-4-6, gpt-4.1, gemini-2.5-flash
+budget: 1.00
+```
+
 ## Flags
 
 ```
-claim                     the question to evaluate (required)
-
-Content input (pick one, or auto-scans current dir):
-  -c, --context TEXT      inline content string
-  -f FILE [FILE ...]      one or more files
-  -d [DIR]                directory (default: current dir)
-  -g, --git               unstaged git diff
-  -gs, --git-staged       staged git diff
-  -gb, --git-branch REF   git diff REF...HEAD
-
-Directory filters (use with -d):
-  -a, --all               scan all files, skip smart selection
-  --ext EXT [EXT ...]     filter by extension (.py .ts)
-  --exclude PAT [PAT ...] glob patterns to exclude (test_*)
-
-Output:
-  -q, --quiet             hide debate transcript, show only verdict
-  --json                  raw JSON output
-  --timeout SECONDS       override timeout per model call
-  --version               show version
+-f FILE [FILE ...]    files to review         -g / -gs / -gb REF   git diffs
+-d [DIR]              scan directory           -a / --ext / --exclude   filters
+-q                    verdict only             --json                raw JSON
+--judge MODEL         override judge           --debaters MODEL ...  override debaters
+--budget USD          cost limit               --timeout SECONDS     per-call timeout
 ```
 
 ## MCP — Claude Code / Cursor
