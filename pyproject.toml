@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "verd"
-version = "0.2.1"
+version = "0.2.2"
 description = "Multi-LLM debate engine — verdicts everywhere"
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,6 +33,9 @@ slack = [
 dev = [
     "pytest>=8.0.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["verd*"]
 
 [project.scripts]
 verd      = "verd.__main__:main_default"
