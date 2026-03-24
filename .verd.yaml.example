@@ -1,0 +1,8 @@
+# ~/.verd.yaml — verd configuration file
+# Copy to ~/.verd.yaml and customize.
+# Precedence: CLI > env > file > defaults
+
+judge: gpt-5.4
+debaters: claude-sonnet-4-6, gpt-4.1, gemini-2.5-flash
+budget: 1.00
+timeout: 30
