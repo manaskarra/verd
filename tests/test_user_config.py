@@ -1,52 +1,9 @@
-"""Tests for user config file + env var support."""
+"""Tests for user config env var support."""
 
 import os
-import tempfile
-from pathlib import Path
 from unittest import mock
 
-from verd.user_config import _parse_simple_yaml, load_user_config, apply_config_to_args
-
-
-def test_parse_simple_yaml():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("judge: gpt-5.4\n")
-        f.write("budget: 1.50\n")
-        f.write("timeout: 60\n")
-        f.write("# this is a comment\n")
-        f.write("\n")
-        f.write("debaters: model-a, model-b, model-c\n")
-        f.name
-    try:
-        data = _parse_simple_yaml(Path(f.name))
-        assert data["judge"] == "gpt-5.4"
-        assert data["budget"] == "1.50"
-        assert data["timeout"] == "60"
-        assert data["debaters"] == ["model-a", "model-b", "model-c"]
-    finally:
-        os.unlink(f.name)
-
-
-def test_parse_simple_yaml_handles_quotes():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write('judge: "claude-sonnet-4-6"\n')
-        f.name
-    try:
-        data = _parse_simple_yaml(Path(f.name))
-        assert data["judge"] == "claude-sonnet-4-6"
-    finally:
-        os.unlink(f.name)
-
-
-def test_parse_empty_file():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("")
-        f.name
-    try:
-        data = _parse_simple_yaml(Path(f.name))
-        assert data == {}
-    finally:
-        os.unlink(f.name)
+from verd.user_config import load_user_config, apply_config_to_args
 
 
 def test_env_vars_override():
@@ -61,6 +18,28 @@ def test_env_vars_override():
         assert cfg["debaters"] == ["model-x", "model-y"]
         assert cfg["budget"] == 2.00
         assert cfg["timeout"] == 30
+
+
+def test_per_tier_env_vars_override_global():
+    with mock.patch.dict(os.environ, {
+        "VERD_JUDGE": "global-judge",
+        "VERDL_JUDGE": "light-judge",
+        "VERD_DEBATERS": "global-a,global-b",
+        "VERDL_DEBATERS": "light-a,light-b",
+    }):
+        cfg = load_user_config("verdl")
+        assert cfg["judge"] == "light-judge"
+        assert cfg["debaters"] == ["light-a", "light-b"]
+
+
+def test_per_tier_falls_back_to_global():
+    with mock.patch.dict(os.environ, {
+        "VERD_JUDGE": "global-judge",
+    }, clear=False):
+        # Remove any tier-specific var
+        os.environ.pop("VERDH_JUDGE", None)
+        cfg = load_user_config("verdh")
+        assert cfg["judge"] == "global-judge"
 
 
 def test_apply_config_cli_wins():
@@ -78,7 +57,6 @@ def test_apply_config_cli_wins():
         "timeout": 120,
     }
     apply_config_to_args(Args(), user_cfg)
-    # CLI values should NOT be overwritten
     assert Args.judge == "cli-judge"
 
 

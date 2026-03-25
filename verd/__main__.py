@@ -133,7 +133,7 @@ def run(mode: str):
     setup_logging(logging.DEBUG if getattr(args, 'verbose', False) else logging.WARNING)
 
     # Load user config (file + env vars), then let CLI flags override
-    user_cfg = load_user_config()
+    user_cfg = load_user_config(mode)
     apply_config_to_args(args, user_cfg)
 
     content, claim, files = build_context(args)
@@ -203,11 +203,121 @@ def run(mode: str):
         sys.exit(exit_codes.get(verdict, 2))
 
 
+def _cmd_setup():
+    """Interactive setup wizard — generates .env or MCP config."""
+    import shutil
+
+    DIV = "-" * 50
+
+    print(f"\n  verd {VERSION} — setup\n")
+    print(DIV)
+
+    py_major, py_minor = sys.version_info.major, sys.version_info.minor
+    if (py_major, py_minor) < (3, 11):
+        print(
+            f"  WARNING: Python {py_major}.{py_minor} detected — verd requires Python 3.11+.\n"
+            f"  Install a newer Python and reinstall: pip3.11 install verd",
+            file=sys.stderr,
+        )
+        print(DIV)
+
+    # Usage mode
+    print("\n  How are you using verd?\n")
+    print("    1) CLI     (terminal commands: verd, verdl, verdh)")
+    print("    2) MCP     (inside Claude Code, Cursor, etc.)")
+    mode = input("\n  Enter 1 or 2: ").strip()
+
+    print(f"\n{DIV}")
+
+    # Provider selection
+    print("\n  Which provider?\n")
+    print("    1) OpenRouter  (recommended — one key for all models)")
+    print("    2) LiteLLM     (self-hosted proxy)")
+    print("    3) Other       (any OpenAI-compatible API)")
+    provider = input("\n  Enter 1, 2, or 3: ").strip()
+
+    print(f"\n{DIV}")
+
+    # Build env vars based on provider
+    env = {}
+    if provider == "1":
+        env = {
+            "OPENAI_API_KEY": "your-openrouter-key",
+            "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+        }
+    elif provider == "2":
+        env = {
+            "OPENAI_API_KEY": "your-litellm-key",
+            "OPENAI_BASE_URL": "https://your-litellm-url",
+            "VERDL_JUDGE": "o4-mini",
+            "VERDL_DEBATERS": "gpt-4.1-mini,gemini-3.1-flash-lite-preview",
+            "VERD_JUDGE": "o3",
+            "VERD_DEBATERS": "claude-sonnet-4-6,gpt-4.1,gemini-3.1-pro-preview,gpt-4.1-mini",
+            "VERDH_JUDGE": "o3",
+            "VERDH_DEBATERS": "claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1",
+        }
+        print("\n  Ensure the model names above match what your provider exposes.")
+    else:
+        env = {
+            "OPENAI_API_KEY": "your-api-key",
+            "OPENAI_BASE_URL": "https://your-api/v1",
+            "VERDL_JUDGE": "o4-mini",
+            "VERDL_DEBATERS": "gpt-4.1-mini,gemini-3.1-flash-lite-preview",
+            "VERD_JUDGE": "o3",
+            "VERD_DEBATERS": "claude-sonnet-4-6,gpt-4.1,gemini-3.1-pro-preview,gpt-4.1-mini",
+            "VERDH_JUDGE": "o3",
+            "VERDH_DEBATERS": "claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1",
+        }
+        print("\n  Ensure the model names above match what your provider exposes.")
+
+    print(f"\n{DIV}")
+
+    if mode == "1":
+        # CLI — print .env contents to copy
+        print("\n  Add this to your .env file:\n")
+        for k, v in env.items():
+            print(f"    {k}={v}")
+        print("\n  Replace the placeholders with your actual keys, then run:")
+        print("    verd \"your question here\"")
+
+    else:
+        # MCP — print JSON config
+        verd_mcp_path = shutil.which("verd-mcp")
+        if not verd_mcp_path:
+            print(
+                "\n  WARNING: verd-mcp not found on PATH.\n"
+                "  Try: export PATH=\"$(python3 -m site --user-base)/bin:$PATH\"\n"
+                "  Then re-run: python3 -m verd setup",
+                file=sys.stderr,
+            )
+            verd_mcp_path = "<run 'which verd-mcp' to find the path>"
+
+        config = {
+            "mcpServers": {
+                "verd": {
+                    "command": verd_mcp_path,
+                    "env": env,
+                }
+            }
+        }
+
+        print("\n  Add this to ~/.claude.json (Claude Code) or ~/.cursor/mcp.json (Cursor):\n")
+        print(json.dumps(config, indent=2))
+        print("\n  Replace the OPENAI_API_KEY placeholder with your actual key.")
+
+    print(f"\n{DIV}")
+    print(f"\n  Repo: https://github.com/manaskarra/verd\n")
+
+
 def main_light():
     run("verdl")
 
 
 def main_default():
+    # Handle 'python -m verd setup' as a special subcommand
+    if len(sys.argv) == 2 and sys.argv[1] == "setup":
+        _cmd_setup()
+        return
     run("verd")
 
 

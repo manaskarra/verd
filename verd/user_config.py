@@ -1,87 +1,48 @@
-"""User config file + env var support.
+"""User config — env var support.
 
 Precedence (highest wins):
   1. CLI flags (--judge, --debaters, --budget, --timeout)
-  2. Environment variables (VERD_JUDGE, VERD_DEBATERS, VERD_BUDGET, VERD_TIMEOUT)
-  3. Config file (~/.verd.yaml or ~/.config/verd/config.yaml)
+  2. Per-tier env vars (VERDL_JUDGE, VERD_JUDGE, VERDH_JUDGE, etc.)
+  3. Global env vars (VERD_JUDGE, VERD_DEBATERS, VERD_BUDGET, VERD_TIMEOUT)
   4. Built-in defaults (models.py)
 """
 
-import logging
 import os
-from pathlib import Path
-
-log = logging.getLogger("verd.config")
-
-_CONFIG_PATHS = [
-    Path.home() / ".verd.yaml",
-    Path.home() / ".config" / "verd" / "config.yaml",
-]
 
 
-def _load_yaml_config() -> dict:
-    """Load the first config file found. Returns empty dict if none."""
-    for path in _CONFIG_PATHS:
-        if path.is_file():
-            try:
-                import yaml
-                with open(path) as f:
-                    data = yaml.safe_load(f) or {}
-                log.info("loaded config from %s", path)
-                return data
-            except ImportError:
-                # PyYAML not installed — try simple key: value parsing
-                return _parse_simple_yaml(path)
-            except Exception as e:
-                log.warning("failed to load %s: %s", path, e)
-    return {}
-
-
-def _parse_simple_yaml(path: Path) -> dict:
-    """Minimal YAML-like parser for flat key: value configs (no PyYAML needed)."""
-    data = {}
-    try:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if ":" not in line:
-                continue
-            key, _, value = line.partition(":")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if not value:
-                continue
-            # Handle lists written as "a, b, c" or "a b c"
-            if "," in value:
-                data[key] = [v.strip() for v in value.split(",") if v.strip()]
-            else:
-                data[key] = value
-    except Exception as e:
-        log.warning("failed to parse %s: %s", path, e)
-    return data
-
-
-def load_user_config() -> dict:
-    """Load user config from file + env vars. Returns merged dict.
+def load_user_config(mode: str = "verd") -> dict:
+    """Load user config from env vars. Returns dict.
 
     Keys: judge, debaters (list), budget (float), timeout (int)
-    """
-    cfg = _load_yaml_config()
 
-    # Env vars override file config
-    if os.getenv("VERD_JUDGE"):
-        cfg["judge"] = os.environ["VERD_JUDGE"]
-    if os.getenv("VERD_DEBATERS"):
-        cfg["debaters"] = os.environ["VERD_DEBATERS"].split(",")
-    if os.getenv("VERD_BUDGET"):
+    Per-tier env vars (e.g. VERDL_JUDGE, VERDH_DEBATERS) override
+    global vars (VERD_JUDGE, VERD_DEBATERS).
+    """
+    cfg = {}
+
+    # Tier prefix for per-tier env vars: VERDL_, VERD_, VERDH_
+    tier_prefix = mode.upper() + "_"
+
+    # Per-tier wins over global
+    judge = os.getenv(tier_prefix + "JUDGE") or os.getenv("VERD_JUDGE")
+    if judge:
+        cfg["judge"] = judge
+
+    debaters = os.getenv(tier_prefix + "DEBATERS") or os.getenv("VERD_DEBATERS")
+    if debaters:
+        cfg["debaters"] = [d.strip() for d in debaters.split(",") if d.strip()]
+
+    budget = os.getenv(tier_prefix + "BUDGET") or os.getenv("VERD_BUDGET")
+    if budget:
         try:
-            cfg["budget"] = float(os.environ["VERD_BUDGET"])
+            cfg["budget"] = float(budget)
         except ValueError:
             pass
-    if os.getenv("VERD_TIMEOUT"):
+
+    timeout = os.getenv(tier_prefix + "TIMEOUT") or os.getenv("VERD_TIMEOUT")
+    if timeout:
         try:
-            cfg["timeout"] = int(os.environ["VERD_TIMEOUT"])
+            cfg["timeout"] = int(timeout)
         except ValueError:
             pass
 

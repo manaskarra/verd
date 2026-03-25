@@ -44,22 +44,25 @@ def _collect_files(
     dir_path: Path,
     extensions: list[str] | None,
     excludes: list[str] | None,
+    all_files: bool = False,
 ) -> list[tuple[Path, str, str]]:
     """Collect files from directory. Returns list of (relative_path, content, extension).
 
-    Auto-detects extensions if None.
+    Auto-detects extensions if None (unless all_files=True, which skips smart selection).
     """
     if extensions is None:
-        counts: dict[str, int] = {}
-        for p in dir_path.rglob("*"):
-            if not p.is_file() or not _is_valid_path(p):
-                continue
-            if p.suffix in _CODE_EXTENSIONS:
-                counts[p.suffix] = counts.get(p.suffix, 0) + 1
-        if not counts:
-            return []
-        extensions = sorted(counts, key=counts.get, reverse=True)
-        pass  # auto-detected extensions
+        if all_files:
+            extensions = list(_CODE_EXTENSIONS)
+        else:
+            counts: dict[str, int] = {}
+            for p in dir_path.rglob("*"):
+                if not p.is_file() or not _is_valid_path(p):
+                    continue
+                if p.suffix in _CODE_EXTENSIONS:
+                    counts[p.suffix] = counts.get(p.suffix, 0) + 1
+            if not counts:
+                return []
+            extensions = sorted(counts, key=counts.get, reverse=True)
 
     files = []
     for p in sorted(dir_path.rglob("*")):
@@ -152,7 +155,7 @@ def build_context(args) -> tuple[str, str, list[tuple[Path, str, str]] | None]:
         dir_path = Path(args.dir) if args.dir else Path(".")
         exts = args.ext or None
         excludes = args.exclude or None
-        files = _collect_files(dir_path, exts, excludes)
+        files = _collect_files(dir_path, exts, excludes, all_files=args.all)
         content = files_to_content(files)
     elif args.file:
         parts = []

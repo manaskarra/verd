@@ -339,9 +339,9 @@ async def _run_followup_round(
     return round_valid, round_entries
 
 
-async def _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status, mode=None):
+async def _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status):
     """Run judge with retry on primary, then fallback chain."""
-    FALLBACK_JUDGES = ["claude-sonnet-4-6", "gpt-5.4", "gpt-4.1"]
+    FALLBACK_JUDGES = ["openai/o4-mini", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1"]
     judge_timeout = max(timeout, 90)
 
     status(f"{judge_model} delivering verdict")
@@ -353,7 +353,7 @@ async def _run_judge(judge_model, content, claim, transcript, timeout, debater_r
         try:
             result, judge_usage = await run_judge(
                 attempt_judge, content, claim, transcript, judge_timeout,
-                model_roles=debater_roles, mode=mode,
+                model_roles=debater_roles,
             )
             track_usage(attempt_judge, judge_usage)
             if attempt_judge != judge_model:
@@ -469,7 +469,7 @@ async def run_debate(
             print_round(round_num, round_entries)
 
     # Judge
-    result = await _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status, mode)
+    result = await _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status)
 
     # Confidence from vote math
     result["confidence"] = _calculate_confidence(result, debater_roles)

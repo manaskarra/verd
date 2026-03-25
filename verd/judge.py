@@ -160,17 +160,12 @@ async def run_judge(
     transcript: list[dict],
     timeout: int,
     model_roles: dict[str, str] | None = None,
-    mode: str | None = None,
 ) -> tuple[dict, dict]:
     """Returns (parsed_result, usage_dict)."""
-    from verd.models import JUDGE_PARAMS
     prompt = _build_judge_prompt(content, claim, transcript, model_roles)
     messages = [{"role": "user", "content": prompt}]
 
     extra = MODEL_PARAMS.get(model, {})
-    # Apply per-tier judge params (reasoning effort)
-    if mode and mode in JUDGE_PARAMS:
-        extra = {**extra, **JUDGE_PARAMS[mode]}
     kwargs = {
         "model": model,
         "messages": messages,

@@ -6,24 +6,18 @@ verd spawns multiple AI models from different families — each with a specializ
 
 Use it everywhere: **CLI** for code reviews, **MCP** inside Claude Code and Cursor, **Slack** as `@verd` in any conversation, or **pipe** anything into it.
 
-## Install
+## Getting Started
+
+**Requires Python 3.11+.**
 
 ```bash
 pip install verd
+python3 -m verd setup
 ```
 
-## Setup
+The setup wizard walks you through provider selection (OpenRouter, LiteLLM, or other) and outputs the exact config you need — for both CLI (`.env`) and MCP (JSON to paste into your editor config).
 
-verd talks to any OpenAI-compatible API. Set two env vars (or put them in a `.env` file):
-
-```bash
-export OPENAI_API_KEY=your-key
-export OPENAI_BASE_URL=https://openrouter.ai/api/v1
-```
-
-verd runs multiple models in parallel (Claude, Gemini, GPT) so it needs a provider that routes to all of them. [OpenRouter](https://openrouter.ai) is the easiest — one key, all models. [LiteLLM proxy](https://docs.litellm.ai/) works too.
-
-> **Note:** Model names must match your provider's IDs. The defaults use OpenRouter-style names (`claude-sonnet-4-6`, `gemini-2.5-flash`, etc.). If your LiteLLM proxy uses different names (e.g. `anthropic/claude-sonnet-4-6`), override them in `~/.verd.yaml`.
+verd runs multiple models in parallel (Claude, Gemini, GPT, DeepSeek) so it needs a multi-provider router. [OpenRouter](https://openrouter.ai) is the easiest — one key, all models. [LiteLLM proxy](https://docs.litellm.ai/) works too.
 
 ## Usage
 
@@ -32,6 +26,9 @@ verd "Kafka or RabbitMQ for our event pipeline?" -f architecture.md
 verd "can this auth middleware be bypassed?" -f auth.py middleware.py
 verdh "should we merge this?" -gb main
 verdl "is O(n^2) acceptable for n=1000?"
+verd "any issues?" -d                          # scan current directory
+verd "any issues?" -d ./src -a                 # scan all files, skip smart selection
+verd "is this correct?" -c "SELECT * FROM users WHERE id=$id"
 cat deploy.yaml | verd "any misconfigs that could expose prod?"
 ```
 
@@ -57,9 +54,9 @@ Vote breakdown, unique catches (`!`), dissent, strengths, issues, and actionable
 
 | Command | Debaters | Roles | Rounds | Speed | Cost |
 |---------|----------|-------|--------|-------|------|
-| `verdl` | 2 + judge | analyst, devils_advocate | 1 | ~15-30s | ~$0.02 |
-| `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30-60s | ~$0.15+ |
-| `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60-120s | ~$0.40+ |
+| `verdl` | 2 + judge | analyst, devils_advocate | 1 | ~15s+ | ~$0.01 |
+| `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30s+ | ~$0.05+ |
+| `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60s+ | ~$0.25+ |
 
 ## Benchmark
 
@@ -71,7 +68,7 @@ Tested on the [Martian Code Review Benchmark](https://codereview.withmartian.com
 | Claude Opus 4.6 (alone) | 18.5% | 69.9% | 29.2% | 10.1 |
 | **verdh (5-model debate)** | **29.1%** | **64.0%** | **40.0%** | **5.9** |
 
-**+37% F1 over Claude solo. 57% more precise. 42% fewer false positives.** Fewer issues, more of them real.
+**+37% F1 over Claude solo. 57% more precise. 42% fewer false positives.** 
 
 ## How it works
 
@@ -99,44 +96,44 @@ The judge weighs each reviewer's input by role — a fact_checker citing sources
 
 ## Config
 
-Customize models via `~/.verd.yaml`, env vars (`VERD_JUDGE`, `VERD_DEBATERS`, `VERD_BUDGET`, `VERD_TIMEOUT`), or CLI flags. Precedence: CLI > env > file > defaults.
+Override models via env vars or CLI flags. Per-tier env vars let you set different models for each mode:
 
-```yaml
-# ~/.verd.yaml
-judge: gpt-5.4
-debaters: claude-sonnet-4-6, gpt-4.1, gemini-2.5-flash
-budget: 1.00
+```bash
+VERDL_JUDGE=o4-mini            VERDL_DEBATERS=gpt-4.1-mini,gemini-3.1-flash-lite-preview
+VERD_JUDGE=o3                  VERD_DEBATERS=claude-sonnet-4-6,gpt-4.1,gemini-3.1-pro-preview,gpt-4.1-mini
+VERDH_JUDGE=o3                 VERDH_DEBATERS=claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1
 ```
+
+Or use `VERD_JUDGE` / `VERD_DEBATERS` as a global override for all tiers. `python3 -m verd setup` generates the right config for your provider.
 
 ## Flags
 
 ```
--f FILE [FILE ...]    files to review         -g / -gs / -gb REF   git diffs
--d [DIR]              scan directory           -a / --ext / --exclude   filters
--q                    verdict only             --json                raw JSON
---judge MODEL         override judge           --debaters MODEL ...  override debaters
---budget USD          cost limit               --timeout SECONDS     per-call timeout
+-c TEXT               inline content string
+-f FILE [FILE ...]    one or more files to evaluate
+-d [DIR]              read all files in a directory (default: current dir)
+-g                    use unstaged git diff as content
+-gs                   use staged git diff as content
+-gb REF               use git diff REF...HEAD as content (e.g. main)
+-a / --all            scan all files, skip smart selection (use with -d)
+--ext EXT [EXT ...]   filter by extension (use with -d)
+--exclude PATTERN     glob patterns to exclude (use with -d)
+-q / --quiet          hide debate transcript, show only verdict
+--json                output raw JSON
+--judge MODEL         override judge model
+--debaters MODEL ...  override debater models
+--budget USD          max cost in USD — abort if estimate exceeds budget
+--timeout SECONDS     override timeout per model call
+--version             show version and exit
 ```
 
 ## MCP — Claude Code / Cursor
 
-Add to `~/.claude.json` or `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "verd": {
-      "command": "verd-mcp",
-      "env": {
-        "OPENAI_API_KEY": "your-openrouter-key",
-        "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
-      }
-    }
-  }
-}
+```bash
+python3 -m verd setup    # select "MCP" and your provider
 ```
 
-Then use `verd`, `verdl`, or `verdh` as tools directly in chat. Ask a question, paste code, then say "use verd to check this."
+This prints the exact JSON to paste into `~/.claude/settings.json` (Claude Code) or `~/.cursor/mcp.json` (Cursor), with the correct absolute path to `verd-mcp` and model overrides for your provider. Then use `verd`, `verdl`, or `verdh` as tools directly in chat.
 
 ## Slack
 

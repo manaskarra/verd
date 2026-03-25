@@ -1,9 +1,48 @@
 import asyncio
 import json
+import os
+import sys
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from verd.engine import run_debate
+
+
+def _validate_env() -> None:
+    """Validate required environment variables before starting the MCP server.
+
+    Prints actionable error messages to stderr and exits if misconfigured,
+    so users see a clear diagnosis instead of a cryptic API error mid-run.
+    """
+    errors = []
+
+    py_major, py_minor = sys.version_info.major, sys.version_info.minor
+    if (py_major, py_minor) < (3, 11):
+        errors.append(
+            f"  - Python >= 3.11 required, found {py_major}.{py_minor}.\n"
+            f"    Run: python3.11 -m pip install verd"
+        )
+
+    if not os.getenv("OPENAI_API_KEY"):
+        errors.append(
+            "  - OPENAI_API_KEY is not set.\n"
+            "    Add it to the 'env' block in your MCP config JSON, or export it in your shell."
+        )
+
+    if not os.getenv("OPENAI_BASE_URL"):
+        errors.append(
+            "  - OPENAI_BASE_URL is not set.\n"
+            "    Set it to your provider's base URL, e.g.:\n"
+            '      "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"'
+        )
+
+    if errors:
+        print(
+            "verd-mcp: startup failed — fix the following before retrying:\n"
+            + "\n".join(errors),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 app = Server("verd")
 
@@ -114,6 +153,7 @@ async def _run():
 
 
 def main():
+    _validate_env()
     asyncio.run(_run())
 
 
