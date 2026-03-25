@@ -59,6 +59,22 @@ Vote breakdown, unique catches (`!`), dissent, strengths, issues, and actionable
 | `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30-60s | ~$0.15+ |
 | `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60-120s | ~$0.40+ |
 
+## Benchmark
+
+Tested on the [Martian Code Review Benchmark](https://codereview.withmartian.com) — 50 real PRs from Cal.com, Discourse, Grafana, Keycloak, and Sentry with expert-labeled golden comments. No code-review-specific tuning.
+
+| Mode | Precision | Recall | F1 Score | Avg Issues |
+|------|-----------|--------|----------|------------|
+| GPT-5.4 (alone) | 13.0% | 70.6% | 21.9% | 14.6 |
+| Claude Opus 4.6 (alone) | 18.5% | 69.9% | 29.2% | 10.1 |
+| **verdh (5-model debate)** | **29.1%** | **64.0%** | **40.0%** | **5.9** |
+
+**+37% F1 over Claude solo. 57% more precise. 42% fewer false positives.** Fewer issues, more of them real.
+
+On the Martian offline leaderboard this places verdh around #8 — ahead of Claude Code Reviewer, GitHub Copilot, and Greptile — with zero domain-specific optimization.
+
+[Full results and methodology →](benchmark/)
+
 ## How it works
 
 1. Your question + content gets sent to multiple AI models in parallel
@@ -69,7 +85,7 @@ Vote breakdown, unique catches (`!`), dissent, strengths, issues, and actionable
 6. **Confidence is calculated from vote distribution** — a fact_checker's dissent lowers confidence more than a devils_advocate's expected pushback
 7. You get: verdict, vote breakdown, strengths, issues, unique catches, dissent, and actionable fixes
 
-The key insight: different models have different blind spots. Claude spots nuance GPT misses. Gemini catches logic errors DeepSeek overlooks. The debate surfaces all of them — and tells you exactly which model caught what.
+The key insight: different model families have different blind spots and training biases. Claude spots nuance GPT misses. Gemini catches logic errors DeepSeek overlooks. More importantly — if the same model writes the review and judges its quality, it's likely to agree with itself. Cross-model diversity means the judge is a genuine quality gate, not a model grading its own homework. The debate surfaces what each model uniquely caught and tells you exactly which model caught what.
 
 ## Roles
 
