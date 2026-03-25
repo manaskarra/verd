@@ -119,7 +119,8 @@ def format_result(result: dict) -> Text:
     cost = result.get("cost", 0)
     if cost:
         footer_parts.append(f"~${cost:.2f}")
-    output.append(f"\n\n{' \u2022 '.join(footer_parts)}", style="dim")
+    joiner = " \u2022 "
+    output.append(f"\n\n{joiner.join(footer_parts)}", style="dim")
 
     return output
 
