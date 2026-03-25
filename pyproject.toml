@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "verd"
-version = "0.2.2"
+version = "0.2.3"
 description = "Multi-LLM debate engine — verdicts everywhere"
 readme = "README.md"
 license = {text = "MIT"}
