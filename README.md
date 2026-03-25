@@ -18,10 +18,12 @@ verd talks to any OpenAI-compatible API. Set two env vars (or put them in a `.en
 
 ```bash
 export OPENAI_API_KEY=your-key
-export OPENAI_BASE_URL=https://openrouter.ai/api/v1  # or any compatible endpoint
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1
 ```
 
-Works with [OpenRouter](https://openrouter.ai) (easiest — all models, one key), direct OpenAI, [LiteLLM proxy](https://docs.litellm.ai/), Azure, Together, Groq, etc.
+verd runs multiple models in parallel (Claude, Gemini, GPT) so it needs a provider that routes to all of them. [OpenRouter](https://openrouter.ai) is the easiest — one key, all models. [LiteLLM proxy](https://docs.litellm.ai/) works too.
+
+> **Note:** Model names must match your provider's IDs. The defaults use OpenRouter-style names (`claude-sonnet-4-6`, `gemini-2.5-flash`, etc.). If your LiteLLM proxy uses different names (e.g. `anthropic/claude-sonnet-4-6`), override them in `~/.verd.yaml`.
 
 ## Usage
 
@@ -70,10 +72,6 @@ Tested on the [Martian Code Review Benchmark](https://codereview.withmartian.com
 | **verdh (5-model debate)** | **29.1%** | **64.0%** | **40.0%** | **5.9** |
 
 **+37% F1 over Claude solo. 57% more precise. 42% fewer false positives.** Fewer issues, more of them real.
-
-On the Martian offline leaderboard this places verdh around #8 — ahead of Claude Code Reviewer, GitHub Copilot, and Greptile — with zero domain-specific optimization.
-
-[Full results and methodology →](benchmark/)
 
 ## How it works
 
@@ -130,7 +128,7 @@ Add to `~/.claude.json` or `~/.cursor/mcp.json`:
     "verd": {
       "command": "verd-mcp",
       "env": {
-        "OPENAI_API_KEY": "your-key",
+        "OPENAI_API_KEY": "your-openrouter-key",
         "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
       }
     }
