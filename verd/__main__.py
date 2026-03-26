@@ -195,7 +195,7 @@ def run(mode: str):
         if "No models responded" in str(e) or "API" in str(e):
             print(
                 "\n  Looks like verd isn't configured yet."
-                "\n  Run: python3 -m verd setup\n",
+                "\n  Run: verd setup\n",
                 file=sys.stderr,
             )
         sys.exit(1)
@@ -299,7 +299,7 @@ def _cmd_setup():
             print(
                 "\n  WARNING: verd-mcp not found on PATH.\n"
                 "  Try: export PATH=\"$(python3 -m site --user-base)/bin:$PATH\"\n"
-                "  Then re-run: python3 -m verd setup",
+                "  Then re-run: verd setup",
                 file=sys.stderr,
             )
             verd_mcp_path = "<run 'which verd-mcp' to find the path>"
@@ -326,10 +326,18 @@ def main_light():
 
 
 def main_default():
-    # Handle 'python -m verd setup' as a special subcommand
+    # Handle 'verd setup' as a special subcommand
     if len(sys.argv) == 2 and sys.argv[1] == "setup":
         _cmd_setup()
         return
+    # Bare 'verd' with no args — show welcome + setup hint
+    if len(sys.argv) == 1:
+        print(
+            f"\n  verd {VERSION} — multi-LLM debate engine\n"
+            f"\n  Usage:  verd \"your question here\""
+            f"\n  Setup:  verd setup\n",
+        )
+        sys.exit(0)
     run("verd")
 
 

@@ -94,7 +94,7 @@ def check_version():
                 f.write(VERSION)
             print(
                 f"\n  Welcome to verd {VERSION}!"
-                f"\n  Run: python3 -m verd setup"
+                f"\n  Run: verd setup"
                 f"\n  to configure verd CLI or MCP server.\n",
                 file=sys.stderr,
             )

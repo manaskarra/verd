@@ -11,7 +11,7 @@ Use it everywhere: **CLI** for code reviews, **MCP** inside Claude Code and Curs
 
 ```bash
 pip install verd
-python3 -m verd setup
+verd setup
 ```
 
 The setup wizard walks you through provider selection (OpenRouter, LiteLLM, or other) and outputs the exact config you need — for both CLI (`.env`) and MCP (JSON to paste into your editor config).
@@ -103,7 +103,7 @@ VERD_JUDGE=o3                  VERD_DEBATERS=claude-sonnet-4-6,gpt-4.1,gemini-3.
 VERDH_JUDGE=o3                 VERDH_DEBATERS=claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1
 ```
 
-Or use `VERD_JUDGE` / `VERD_DEBATERS` as a global override for all tiers. `python3 -m verd setup` generates the right config for your provider.
+Or use `VERD_JUDGE` / `VERD_DEBATERS` as a global override for all tiers. `verd setup` generates the right config for your provider.
 
 ## Flags
 
@@ -129,7 +129,7 @@ Or use `VERD_JUDGE` / `VERD_DEBATERS` as a global override for all tiers. `pytho
 ## MCP — Claude Code / Cursor
 
 ```bash
-python3 -m verd setup    # select "MCP" and your provider
+verd setup    # select "MCP" and your provider
 ```
 
 This prints the exact JSON to paste into `~/.claude/settings.json` (Claude Code) or `~/.cursor/mcp.json` (Cursor), with the correct absolute path to `verd-mcp` and model overrides for your provider. Then use `verd`, `verdl`, or `verdh` as tools directly in chat.
