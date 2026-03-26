@@ -20,15 +20,23 @@ verd runs multiple models in parallel (Claude, Gemini, GPT, DeepSeek) so it need
 
 ## Usage
 
+**CLI**
 ```bash
-verd "Kafka or RabbitMQ for our event pipeline?" -f architecture.md
 verd "can this auth middleware be bypassed?" -f auth.py middleware.py
-verdh "should we merge this?" -gb main
-verdl "is O(n^2) acceptable for n=1000?"
-verd "any issues?" -d                          # scan current directory
-verd "any issues?" -d ./src -a                 # scan all files, skip smart selection
-verd "is this correct?" -c "SELECT * FROM users WHERE id=$id"
-cat deploy.yaml | verd "any misconfigs that could expose prod?"
+verdh "should we merge this?" -gb main         # deep mode — 5 models + web search
+```
+
+**MCP** (Claude Code / Cursor) — use `verd`, `verdl`, `verdh` as tools directly in chat:
+```
+verd "any security issues in this file?"
+verdh "should we merge this PR?"
+```
+
+**Slack** — mention `@verd` in any channel or thread:
+```
+@verd what do you think?          — reads thread context, debates, replies
+@verd deep is this secure?        — uses verdh (5 models + web search)
+/verd should we use Kafka?        — slash command with live progress
 ```
 
 ## Output
@@ -150,15 +158,6 @@ export SLACK_APP_TOKEN=xapp-...
 export SLACK_SIGNING_SECRET=...
 verd-slack
 ```
-
-Usage in Slack:
-- `@verd what do you think?` — reads thread or last 20 channel messages, debates, replies in thread
-- `@verd deep is this secure?` — uses verdh (5 models + web search)
-- `@verd quick is this right?` — uses verdl (fast, 2 models)
-- `@verd last 50 what's the consensus?` — reads last 50 messages as context
-- `/verd should we use Kafka?` — slash command with live progress updates
-- `/verdl is this correct?` — quick slash command
-- `/verdh any security issues?` — deep slash command
 
 Optional: restrict access via environment variables:
 ```bash
