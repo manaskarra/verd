@@ -11,6 +11,7 @@ from verd.log import setup as setup_logging
 from verd.models import MODELS
 from verd.output import print_result, StatusDisplay
 from verd.user_config import load_user_config, apply_config_to_args
+from verd.version_check import check_version
 
 
 def make_parser():
@@ -126,6 +127,7 @@ def _apply_model_overrides(mode: str, args) -> None:
 
 
 def run(mode: str):
+    check_version()
     parser = make_parser()
     args = parser.parse_args()
 
