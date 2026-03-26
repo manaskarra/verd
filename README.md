@@ -28,8 +28,8 @@ verdh "should we merge this?" -gb main         # deep mode — 5 models + web se
 
 **MCP** (Claude Code / Cursor) — use `verd`, `verdl`, `verdh` as tools directly in chat:
 ```
-verdh based on the context above, do you think this needs to be done?
-verdl is this approach correct given what we discussed?
+verdh based on the context above and this file, do you think we can proceed?
+is this approach correct given what we discussed, use verdl
 ```
 
 **Slack** — mention `@verd` in any channel or thread:

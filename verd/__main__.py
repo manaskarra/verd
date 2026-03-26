@@ -207,12 +207,8 @@ def run(mode: str):
     else:
         print_result(result)
 
-    # Exit codes only when piped or --json (useful for scripting: verd "check" && deploy)
-    # Interactive use always exits 0 so it doesn't look like an error
-    if args.json_output or not sys.stdout.isatty():
-        verdict = result.get("verdict", "UNCERTAIN")
-        exit_codes = {"PASS": 0, "FAIL": 1, "UNCERTAIN": 2}
-        sys.exit(exit_codes.get(verdict, 2))
+    # Exit 0 for any completed verdict; exit 1 only for actual errors
+    sys.exit(0)
 
 
 def _cmd_setup():
