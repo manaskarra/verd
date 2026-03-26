@@ -28,8 +28,8 @@ verdh "should we merge this?" -gb main         # deep mode — 5 models + web se
 
 **MCP** (Claude Code / Cursor) — use `verd`, `verdl`, `verdh` as tools directly in chat:
 ```
-verd "any security issues in this file?"
-verdh "should we merge this PR?"
+verdh based on the context above, do you think this needs to be done?
+verdl is this approach correct given what we discussed?
 ```
 
 **Slack** — mention `@verd` in any channel or thread:
