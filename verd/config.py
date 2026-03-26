@@ -1,10 +1,24 @@
 import os
+from pathlib import Path
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-load_dotenv()
+# Search for .env: cwd first, then walk up parents, finally verd's own dir.
+def _find_dotenv() -> Path | None:
+    cwd = Path.cwd().resolve()
+    for d in [cwd, *cwd.parents]:
+        candidate = d / ".env"
+        if candidate.is_file():
+            return candidate
+    # Fallback: verd package's own .env
+    pkg = Path(__file__).resolve().parent.parent / ".env"
+    return pkg if pkg.is_file() else None
 
-VERSION = "0.3.5"
+_env_path = _find_dotenv()
+if _env_path:
+    load_dotenv(_env_path)
+
+VERSION = "0.3.6"
 
 # Token budgets — reasoning models use these for thinking + output combined
 # Keep high enough that reasoning models don't run out of thinking space
