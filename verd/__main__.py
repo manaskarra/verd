@@ -189,6 +189,16 @@ def run(mode: str):
                 verbose=not args.quiet,
             )
         )
+    except RuntimeError as e:
+        status.stop()
+        print(f"\n  Error: {e}", file=sys.stderr)
+        if "No models responded" in str(e) or "API" in str(e):
+            print(
+                "\n  Looks like verd isn't configured yet."
+                "\n  Run: python3 -m verd setup\n",
+                file=sys.stderr,
+            )
+        sys.exit(1)
     finally:
         status.stop()
 

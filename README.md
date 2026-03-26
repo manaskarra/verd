@@ -2,10 +2,9 @@
 
 **Five minds enter. They argue, challenge, cross-examine. Only the truth walks out.**
 
-verd spawns multiple AI models from different families — each with a specialized role — has them debate your question across rounds, then a stronger judge delivers the final verdict with strengths, issues, and actionable fixes.
+verd spawns multiple AI models from different families — each with a specialized role, has them debate your question across rounds, then a stronger judge delivers the final verdict with strengths, issues, and actionable fixes.
 
-Use it everywhere: **CLI** for code reviews, **MCP** inside Claude Code and Cursor, **Slack** as `@verd` in any conversation, or **pipe** anything into it.
-
+Use it everywhere: **CLI** for code reviews, **MCP** inside Claude Code and Cursor, and **Slack** as `@verd` in any conversation.
 ## Getting Started
 
 **Requires Python 3.11+.**
