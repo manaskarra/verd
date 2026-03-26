@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 # Token budgets — reasoning models use these for thinking + output combined
 # Keep high enough that reasoning models don't run out of thinking space

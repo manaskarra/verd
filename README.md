@@ -36,8 +36,10 @@ is this approach correct given what we discussed, use verdl
 ```
 @verd what do you think?          — reads thread context, debates, replies
 @verd deep is this secure?        — uses verdh (5 models + web search)
-/verd should we use Kafka?        — slash command with live progress
+/verd Kafka, SQS, or RabbitMQ for our event pipeline?  — slash command with live progress
 ```
+
+> verd is for critical decisions and deep analysis — not simple lookups. If a single model can answer it, verd is overkill.
 
 ## Output
 
