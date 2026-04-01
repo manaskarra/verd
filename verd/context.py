@@ -1,4 +1,5 @@
 import fnmatch
+import select
 import subprocess
 import sys
 from pathlib import Path
@@ -142,6 +143,14 @@ def _needs_code_context(claim: str) -> bool:
     return False
 
 
+def _stdin_has_data() -> bool:
+    """Check if stdin has data ready without blocking."""
+    try:
+        return bool(select.select([sys.stdin], [], [], 0)[0])
+    except (OSError, ValueError):
+        return False
+
+
 def build_context(args) -> tuple[str, str, list[tuple[Path, str, str]] | None]:
     """Returns (content, claim, files_or_none).
 
@@ -176,7 +185,7 @@ def build_context(args) -> tuple[str, str, list[tuple[Path, str, str]] | None]:
         content = _run_git(["git", "diff", f"{args.git_branch}...HEAD"])
     elif args.context:
         content = args.context
-    elif not sys.stdin.isatty():
+    elif not sys.stdin.isatty() and _stdin_has_data():
         content = sys.stdin.read()
     elif _needs_code_context(args.claim):
         # Auto-scan current directory only if claim references code

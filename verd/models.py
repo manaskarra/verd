@@ -45,52 +45,48 @@ ROLES = {
 MODELS = {
     "verdl": {
         "debaters": [
-            {"model": "openai/gpt-4.1-mini", "role": "analyst"},
-            {"model": "google/gemini-3.1-flash-lite-preview", "role": "devils_advocate"},
+            {"model": "gpt-4.1-mini", "role": "analyst"},
+            {"model": "gemini-3.1-flash-lite-preview", "role": "devils_advocate"},
         ],
-        "judge": "openai/o4-mini",
+        "judge": "o4-mini",
         "rounds": 1,
     },
     "verd": {
         "debaters": [
-            {"model": "anthropic/claude-sonnet-4.6", "role": "analyst"},
-            {"model": "openai/gpt-4.1", "role": "devils_advocate"},
-            {"model": "google/gemini-3.1-pro-preview", "role": "logic_checker"},
-            {"model": "openai/gpt-4.1-mini", "role": "pragmatist"},
+            {"model": "claude-sonnet-4-6", "role": "analyst"},
+            {"model": "gpt-4.1", "role": "devils_advocate"},
+            {"model": "gemini-3.1-pro-preview", "role": "logic_checker"},
+            {"model": "gpt-4.1-mini", "role": "pragmatist"},
         ],
-        "judge": "openai/o3",
+        "judge": "o3",
         "rounds": 2,
     },
     "verdh": {
         "debaters": [
-            {"model": "anthropic/claude-opus-4.6", "role": "analyst"},
-            {"model": "deepseek/deepseek-r1", "role": "devils_advocate"},
-            {"model": "google/gemini-3.1-pro-preview", "role": "logic_checker"},
-            {"model": "perplexity/sonar-pro", "role": "fact_checker"},
-            {"model": "openai/gpt-4.1", "role": "pragmatist"},
+            {"model": "claude-opus-4-6", "role": "analyst"},
+            {"model": "deepseek-r1", "role": "devils_advocate"},
+            {"model": "gemini-3.1-pro-preview", "role": "logic_checker"},
+            {"model": "sonar-pro", "role": "fact_checker"},
+            {"model": "gpt-4.1", "role": "pragmatist"},
         ],
-        "judge": "openai/o3",
+        "judge": "o3",
         "rounds": 3,
     },
 }
 
-MODEL_PARAMS = {
-    "perplexity/sonar-pro": {
-        "web_search_options": {"search_context_size": "high"},
-    },
-}
+MODEL_PARAMS = {}
 
 # Context window sizes in tokens — used to cap content for smaller models
 MODEL_CONTEXT_WINDOWS = {
-    "openai/gpt-4.1-mini":          1_000_000,
-    "openai/gpt-4.1":               1_000_000,
-    "openai/o3":                     200_000,
-    "openai/o4-mini":                200_000,
-    "anthropic/claude-opus-4.6":     1_000_000,
-    "anthropic/claude-sonnet-4.6":   1_000_000,
-    "google/gemini-3.1-flash-lite-preview": 1_000_000,
-    "google/gemini-3.1-pro-preview":        1_000_000,
-    "deepseek/deepseek-r1":           64_000,
-    "perplexity/sonar-pro":          200_000,
+    "gpt-4.1-mini":                  1_000_000,
+    "gpt-4.1":                       1_000_000,
+    "o3":                             200_000,
+    "o4-mini":                        200_000,
+    "claude-opus-4-6":               1_000_000,
+    "claude-sonnet-4-6":             1_000_000,
+    "gemini-3.1-flash-lite-preview": 1_000_000,
+    "gemini-3.1-pro-preview":        1_000_000,
+    "deepseek-r1":                    64_000,
+    "sonar-pro":                     200_000,
 }
 

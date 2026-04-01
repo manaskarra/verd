@@ -18,7 +18,7 @@ _env_path = _find_dotenv()
 if _env_path:
     load_dotenv(_env_path)
 
-VERSION = "0.3.6"
+VERSION = "0.4.0"
 
 # Token budgets — reasoning models use these for thinking + output combined
 # Keep high enough that reasoning models don't run out of thinking space
@@ -36,22 +36,22 @@ TIMEOUTS = {
 }
 
 JSON_MODE_MODELS = {
-    "openai/o3", "openai/o3-mini", "openai/o4-mini",
-    "openai/gpt-4.1", "openai/gpt-4.1-mini",
+    "o3", "o3-mini", "o4-mini",
+    "gpt-4.1", "gpt-4.1-mini",
 }
 
 # Pricing per 1M tokens (input, output) in USD
 MODEL_PRICING = {
-    "openai/gpt-4.1":                       (1.46,  8.00),
-    "openai/gpt-4.1-mini":                  (0.307, 1.60),
-    "openai/o3":                            (1.65,  8.00),
-    "openai/o4-mini":                       (1.03,  4.40),
-    "anthropic/claude-sonnet-4.6":          (1.13, 15.00),
-    "anthropic/claude-opus-4.6":            (2.16, 25.00),
-    "google/gemini-3.1-flash-lite-preview": (0.16,  1.50),
-    "google/gemini-3.1-pro-preview":        (1.13, 12.07),
-    "deepseek/deepseek-r1":                 (0.723, 2.55),
-    "perplexity/sonar-pro":                 (3.00, 28.69),
+    "gpt-4.1":                       (1.46,  8.00),
+    "gpt-4.1-mini":                  (0.307, 1.60),
+    "o3":                            (1.65,  8.00),
+    "o4-mini":                       (1.03,  4.40),
+    "claude-sonnet-4-6":             (1.13, 15.00),
+    "claude-opus-4-6":               (2.16, 25.00),
+    "gemini-3.1-flash-lite-preview": (0.16,  1.50),
+    "gemini-3.1-pro-preview":        (1.13, 12.07),
+    "deepseek-r1":                   (0.723, 2.55),
+    "sonar-pro":                     (3.00, 28.69),
 }
 
 

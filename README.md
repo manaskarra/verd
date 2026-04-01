@@ -23,7 +23,7 @@ verd runs multiple models in parallel (Claude, Gemini, GPT, DeepSeek) so it need
 **CLI**
 ```bash
 verd "can this auth middleware be bypassed?" -f auth.py middleware.py
-verdh "should we merge this?" -gb main         # deep mode — 5 models + web search
+verdh "should we merge this?" -gb main         # deep mode — 5 models, 3 rounds
 ```
 
 **MCP** (Claude Code / Cursor) — use `verd`, `verdl`, `verdh` as tools directly in chat:
@@ -35,7 +35,7 @@ is this approach correct given what we discussed, use verdl
 **Slack** — mention `@verd` in any channel or thread:
 ```
 @verd what do you think?          — reads thread context, debates, replies
-@verd deep is this secure?        — uses verdh (5 models + web search)
+@verd deep is this secure?        — uses verdh (5 models, 3 rounds)
 /verd Kafka, SQS, or RabbitMQ for our event pipeline?  — slash command with live progress
 ```
 
@@ -65,7 +65,7 @@ Vote breakdown, unique catches (`!`), dissent, strengths, issues, and actionable
 |---------|----------|-------|--------|-------|------|
 | `verdl` | 2 + judge | analyst, devils_advocate | 1 | ~15s+ | ~$0.01 |
 | `verd` | 4 + judge | analyst, devils_advocate, logic_checker, pragmatist | 2 | ~30s+ | ~$0.05+ |
-| `verdh` | 5 + judge + web | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60s+ | ~$0.25+ |
+| `verdh` | 5 + judge | analyst, devils_advocate, logic_checker, fact_checker, pragmatist | 3 | ~60s+ | ~$0.25+ |
 
 ## Benchmark
 

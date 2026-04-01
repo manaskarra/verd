@@ -14,7 +14,7 @@ SETUP_MARKER = os.path.join(CACHE_DIR, ".setup_shown")
 CACHE_TTL = 86400  # 24 hours
 PYPI_URL = "https://pypi.org/pypi/verd/json"
 TIMEOUT = 2  # seconds — don't slow down CLI
-MIN_VERSION = "0.3.6"  # hard minimum — older versions are blocked
+MIN_VERSION = "0.4.0"  # hard minimum — older versions are blocked
 
 
 def _parse_version(v: str):

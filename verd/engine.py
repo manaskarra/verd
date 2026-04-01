@@ -341,7 +341,7 @@ async def _run_followup_round(
 
 async def _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status):
     """Run judge with retry on primary, then fallback chain."""
-    FALLBACK_JUDGES = ["openai/o4-mini", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1"]
+    FALLBACK_JUDGES = ["o4-mini", "claude-sonnet-4-6", "gpt-4.1"]
     judge_timeout = max(timeout, 90)
 
     status(f"{judge_model} delivering verdict")

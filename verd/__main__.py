@@ -252,6 +252,12 @@ def _cmd_setup():
         env = {
             "OPENAI_API_KEY": "your-openrouter-key",
             "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+            "VERDL_JUDGE": "openai/o4-mini",
+            "VERDL_DEBATERS": "openai/gpt-4.1-mini,google/gemini-3.1-flash-lite-preview",
+            "VERD_JUDGE": "openai/o3",
+            "VERD_DEBATERS": "anthropic/claude-sonnet-4.6,openai/gpt-4.1,google/gemini-3.1-pro-preview,openai/gpt-4.1-mini",
+            "VERDH_JUDGE": "openai/o3",
+            "VERDH_DEBATERS": "anthropic/claude-opus-4.6,deepseek/deepseek-r1,google/gemini-3.1-pro-preview,perplexity/sonar-pro,openai/gpt-4.1",
         }
     elif provider == "2":
         env = {
@@ -264,7 +270,6 @@ def _cmd_setup():
             "VERDH_JUDGE": "o3",
             "VERDH_DEBATERS": "claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1",
         }
-        print("\n  Ensure the model names above match what your provider exposes.")
     else:
         env = {
             "OPENAI_API_KEY": "your-api-key",
@@ -276,7 +281,8 @@ def _cmd_setup():
             "VERDH_JUDGE": "o3",
             "VERDH_DEBATERS": "claude-opus-4-6,deepseek-r1,gemini-3.1-pro-preview,sonar-pro,gpt-4.1",
         }
-        print("\n  Ensure the model names above match what your provider exposes.")
+
+    needs_model_hint = provider in ("2", "3")
 
     print(f"\n{DIV}")
 
@@ -285,6 +291,8 @@ def _cmd_setup():
         print("\n  Add this to your .env file:\n")
         for k, v in env.items():
             print(f"    {k}={v}")
+        if needs_model_hint:
+            print("\n  Ensure the model names match what your provider exposes.")
         print("\n  Replace the placeholders with your actual keys, then run:")
         print("    verd \"your question here\"")
 
@@ -309,9 +317,11 @@ def _cmd_setup():
             }
         }
 
-        print("\n  Add this to ~/.claude.json (Claude Code) or ~/.cursor/mcp.json (Cursor):\n")
+        print("\n  Add this to ~/.claude/settings.json (Claude Code) or ~/.cursor/mcp.json (Cursor):\n")
         print(json.dumps(config, indent=2))
         print("\n  Replace the OPENAI_API_KEY placeholder with your actual key.")
+        if needs_model_hint:
+            print("  Ensure the model names match what your provider exposes.")
 
     print(f"\n{DIV}")
     print(f"\n  Repo: https://github.com/manaskarra/verd\n")
