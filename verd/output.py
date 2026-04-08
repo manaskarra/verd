@@ -9,6 +9,9 @@ VERDICT_STYLES = {
     "PASS": "bold green",
     "FAIL": "bold red",
     "UNCERTAIN": "bold yellow",
+    "PROCEED": "bold green",
+    "PROCEED_WITH_CONDITIONS": "bold yellow",
+    "DO_NOT_PROCEED": "bold red",
 }
 
 
@@ -34,6 +37,12 @@ class StatusDisplay:
         self.pause()
 
 
+_VOTE_COLORS = {
+    "PASS": "green", "FAIL": "red", "UNCERTAIN": "yellow",
+    "PROCEED": "green", "PROCEED_WITH_CONDITIONS": "yellow", "DO_NOT_PROCEED": "red",
+}
+
+
 def _format_vote_line(model_votes: dict) -> Text:
     """Format model votes as a colored inline summary."""
     t = Text()
@@ -41,7 +50,7 @@ def _format_vote_line(model_votes: dict) -> Text:
         if i > 0:
             t.append("  ")
         short = model.split("-")[0]  # claude, gpt, gemini, etc.
-        style = {"PASS": "green", "FAIL": "red", "UNCERTAIN": "yellow"}.get(vote, "white")
+        style = _VOTE_COLORS.get(vote, "white")
         t.append(f"{short}:", style="dim")
         t.append(vote, style=style)
     return t
@@ -125,6 +134,84 @@ def format_result(result: dict) -> Text:
     return output
 
 
+def format_business_result(result: dict) -> Text:
+    """Format a business-domain verdict for CLI display."""
+    verdict = result.get("verdict", "UNCERTAIN")
+    confidence = result.get("confidence", 0.0)
+    headline = result.get("headline") or ""
+    opportunities = result.get("opportunities", [])
+    risks = result.get("risks", [])
+    conditions = result.get("conditions", [])
+    what_if = result.get("what_if_suggestions", [])
+    unique_catches = result.get("unique_catches", [])
+    model_votes = result.get("model_votes", {})
+    consensus = result.get("consensus", "")
+    dissent = result.get("dissent")
+    elapsed = result.get("elapsed", 0.0)
+
+    style = VERDICT_STYLES.get(verdict, "bold white")
+    pct = f"{int(confidence * 100)}%"
+
+    output = Text()
+
+    output.append(f"{verdict}  ", style=style)
+    output.append(f"{pct}  ", style=style)
+    output.append(headline)
+
+    if model_votes:
+        output.append("\n\n")
+        output.append(_format_vote_line(model_votes))
+        if consensus:
+            output.append(f"  ({consensus})", style="dim")
+
+    if opportunities:
+        output.append("\n")
+        for o in opportunities:
+            output.append(f"\n+ {o}", style="green")
+
+    if risks:
+        output.append("\n")
+        for r in risks:
+            output.append(f"\n- {r}", style="red")
+
+    if unique_catches:
+        output.append("\n")
+        for catch in unique_catches:
+            output.append(f"\n! {catch}", style="magenta")
+
+    if conditions:
+        output.append("\n")
+        for c in conditions:
+            output.append(f"\n\u2192 {c}", style="cyan")
+
+    if what_if:
+        output.append("\n\n")
+        output.append("What-if: ", style="bold blue")
+        for w in what_if:
+            output.append(f"\n  ? {w}", style="blue")
+
+    if dissent:
+        output.append("\n\n")
+        output.append("Dissent: ", style="bold yellow")
+        output.append(dissent, style="yellow")
+
+    usage = result.get("usage", {})
+    footer_parts = [f"completed in {elapsed}s"]
+    total_tokens = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+    if total_tokens:
+        reasoning = usage.get("reasoning_tokens", 0)
+        footer_parts.append(f"{total_tokens:,} tokens")
+        if reasoning:
+            footer_parts.append(f"{reasoning:,} reasoning")
+    cost = result.get("cost", 0)
+    if cost:
+        footer_parts.append(f"~${cost:.2f}")
+    joiner = " \u2022 "
+    output.append(f"\n\n{joiner.join(footer_parts)}", style="dim")
+
+    return output
+
+
 def format_transcript(transcript: list[dict]) -> Text:
     return _format_transcript_text(transcript)
 
@@ -167,5 +254,8 @@ def print_round(round_num: int, entries: list[dict]):
 
 
 def print_result(result: dict):
-    text = format_result(result)
+    if result.get("domain") == "business":
+        text = format_business_result(result)
+    else:
+        text = format_result(result)
     console.print(text)

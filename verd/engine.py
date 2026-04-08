@@ -2,16 +2,170 @@
 
 import asyncio
 import logging
+import re
 import time
 
 from verd.config import get_client, DEBATER_MAX_TOKENS, TIMEOUTS, estimate_cost
 from verd.context import files_to_content
-from verd.models import MODELS, MODEL_PARAMS, MODEL_CONTEXT_WINDOWS, ROLES
+from verd.models import MODELS, MODEL_PARAMS, MODEL_CONTEXT_WINDOWS, ROLES, get_roles
 from verd.judge import run_judge
 from verd.output import print_round
 from verd.selector import select_relevant_files
 
 log = logging.getLogger("verd.engine")
+
+# Display titles for SSE / UI when domain is business
+_BUSINESS_ADVISOR_TITLES = {
+    "strategist": "Strategist",
+    "devils_advocate": "Risk Hunter",
+    "assumption_checker": "Assumption Auditor",
+    "fact_checker": "Market Reality",
+    "pragmatist": "Execution Realist",
+}
+
+
+# Matches a standalone verdict token (whole string or whole line)
+_VERDICT_TOKEN = re.compile(
+    r"PROCEED[\s_]?WITH[\s_]?CONDITIONS|DO[\s_]?NOT[\s_]?PROCEED"
+    r"|PROCEEDWITHCONDITIONS|DONOTPROCEED",
+    re.IGNORECASE,
+)
+
+# Matches lines that are purely a structural label (nothing real after the colon)
+_LABEL_LINE = re.compile(
+    r"^[\w\s&,/()]+?:\s*$",
+    re.IGNORECASE,
+)
+
+# Matches lines whose entire content is a verdict token (possibly with punctuation)
+_VERDICT_ONLY_LINE = re.compile(
+    r"^\s*(PROCEED[\s_]?WITH[\s_]?CONDITIONS|DO[\s_]?NOT[\s_]?PROCEED"
+    r"|PROCEEDWITHCONDITIONS|DONOTPROCEED|VERDICT\s*:\s*\w[\w\s]*"
+    r"|ASSESSMENT\s*:\s*(PROCEED[\w\s]*|DO[\w\s]*))"
+    r"[\s\d.:,\-–—]*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_bubbles(response: str) -> tuple[list[str], str]:
+    """Extract all BUBBLE: lines the LLM appended.
+
+    Returns (list_of_bubbles, response_without_bubble_lines).
+    The LLM is asked to write 3 BUBBLE lines at the end.
+    """
+    lines = response.rstrip().splitlines()
+    bubbles: list[str] = []
+    keep: list[bool] = [True] * len(lines)
+
+    for i, line in enumerate(lines):
+        m = re.match(r"^BUBBLE:\s*(.+)$", line.strip(), re.IGNORECASE)
+        if m:
+            phrase = m.group(1).strip().rstrip(".,;:")
+            if phrase:
+                bubbles.append(phrase)
+            keep[i] = False
+
+    clean_lines = [l for l, k in zip(lines, keep) if k]
+    clean_response = "\n".join(clean_lines).strip()
+    return bubbles, clean_response
+
+
+def _clean_for_transcript(text: str, max_chars: int = 280) -> str:
+    """Return a readable excerpt suitable for the transcript card.
+
+    Strategy:
+    1. Strip markdown formatting.
+    2. Remove verdict tokens and structural labels anywhere they appear.
+    3. Split into sentences, skip junk sentences, return the first real ones.
+    """
+    t = text
+
+    # --- Strip markdown ---
+    t = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", t)
+    t = re.sub(r"(?<![A-Z_])_{1,3}([^_]+)_{1,3}(?![A-Z_])", r"\1", t)
+    t = re.sub(r"`[^`]+`", "", t)
+    t = re.sub(r"^>\s*", "", t, flags=re.MULTILINE)
+    t = re.sub(r"#{1,6}\s*", "", t)
+    t = re.sub(r"[-=]{3,}", " ", t)
+    t = re.sub(r"^[\s]*[-*+]\s+", "", t, flags=re.MULTILINE)
+    t = re.sub(r"^[\s]*\d+\.\s+", "", t, flags=re.MULTILINE)
+
+    # --- Remove verdict tokens inline (e.g. "VERDICT: PROCEEDWITHCONDITIONS") ---
+    t = re.sub(
+        r"(VERDICT|ASSESSMENT)\s*:\s*(PROCEED[\s\w]*|DO[\s\w]*NOT[\s\w]*|PASS|FAIL|UNCERTAIN)\b",
+        "", t, flags=re.IGNORECASE,
+    )
+    # Remove bare verdict tokens that appear at start of a segment
+    t = re.sub(
+        r"(?<![A-Za-z])(PROCEED[\s_]?WITH[\s_]?CONDITIONS|DO[\s_]?NOT[\s_]?PROCEED"
+        r"|PROCEEDWITHCONDITIONS|DONOTPROCEED)(?![A-Za-z])",
+        "", t, flags=re.IGNORECASE,
+    )
+
+    # --- Remove title/header preamble lines ---
+    # e.g. "Business Strategy Analysis: Kenyan Cold-Brew ... — UAE Market"
+    # These are lines that are ALL caps-words / title-cased with colons and dashes, no verb
+    lines_raw = t.splitlines()
+    content_lines: list[str] = []
+    for raw in lines_raw:
+        line = raw.strip()
+        if not line:
+            continue
+        # Skip lines that are purely a verdict token after cleanup
+        if _VERDICT_ONLY_LINE.match(line):
+            continue
+        # Skip lines that are purely a label (e.g. "Fatal flaw:", "Assessment:")
+        if _LABEL_LINE.match(line) and len(line) < 60:
+            continue
+        # Skip lines that look like document titles/headers:
+        # heuristic — no sentence-ending punctuation, mostly title-case, has "—" or ":" + long noun phrase
+        if (
+            len(line) < 120
+            and not re.search(r"[.?!]", line)
+            and re.search(r"[:\-–—]", line)
+            and re.match(r"^[A-Z]", line)
+            and not re.search(r"\b(we|our|you|your|this|the deal|minimum|units|month|risk|unless)\b", line, re.IGNORECASE)
+        ):
+            continue
+        # Strip any residual leading label "Xxx Xxx:" at the very start of a kept line
+        line = re.sub(r"^[A-Z][a-zA-Z\s&/()]{2,30}:\s+", "", line).strip()
+        # Clean up extra spaces left by removals
+        line = re.sub(r"\s{2,}", " ", line).strip()
+        if len(line) < 10:
+            continue
+        content_lines.append(line)
+
+    combined = " ".join(content_lines)
+    combined = re.sub(r"\s+", " ", combined).strip()
+
+    # Cut to max_chars on a sentence boundary
+    if len(combined) <= max_chars:
+        return combined
+    cut = combined[:max_chars]
+    for sep in (". ", "? ", "! "):
+        idx = cut.rfind(sep)
+        if idx > 60:
+            return cut[: idx + 1].strip()
+    return cut.rstrip() + "…"
+
+
+def _advisor_stream_payload(role: str | None, model: str, round_num: int, response: str, domain: str) -> dict:
+    if domain == "business":
+        title = _BUSINESS_ADVISOR_TITLES.get(role or "", role or model.split("/")[-1])
+    else:
+        title = role or model.split("/")[-1]
+
+    bubbles, clean_response = _parse_bubbles(response)
+
+    return {
+        "type": "advisor",
+        "role": role,
+        "title": title,
+        "model": model,
+        "round": round_num,
+        "text": _clean_for_transcript(clean_response),
+        "quips": bubbles,  # list of 1-3 phrases
+    }
 
 
 # --- Model calling with retry ---
@@ -122,11 +276,34 @@ def _is_question(text: str) -> bool:
 
 # --- Prompt building ---
 
-def _build_round0_prompt(content: str, claim: str, role_desc: str | None = None) -> str:
+def _build_round0_prompt(
+    content: str, claim: str, role_desc: str | None = None, domain: str = "technical",
+) -> str:
     role_line = f"{role_desc}\n\n" if role_desc else ""
     is_q = _is_question(claim)
 
-    if is_q:
+    if domain == "business":
+        preamble = (
+            f"{role_line}"
+            "You are an expert advisor in a structured multi-advisor panel evaluating a business decision. "
+            "Other advisors with different specializations are also evaluating this decision independently. "
+            "You will debate across multiple rounds before a final verdict is delivered.\n\n"
+            "Be specific and quantitative. Every claim must include a number, a named entity, a timeframe, "
+            "or a concrete action. Never say 'the market is competitive' — say how many competitors, "
+            "their pricing, their market share. Never say 'there are risks' — name the exact risk, "
+            "its probability, and its dollar impact.\n\n"
+            "IMPORTANT FORMAT RULES:\n"
+            "- Do NOT start with a title, header, or document name.\n"
+            "- Do NOT start with a verdict token (PROCEED, DO NOT PROCEED, etc.).\n"
+            "- Start directly with your most important substantive point as a plain sentence.\n"
+            "- Write in plain prose paragraphs. Do not use numbered lists or section headers."
+        )
+        verdict_instruction = (
+            "End your response by stating your verdict on one line:\n"
+            "Verdict: PROCEED or Verdict: PROCEED_WITH_CONDITIONS or Verdict: DO_NOT_PROCEED\n"
+            "Then one sentence explaining the single biggest reason."
+        )
+    elif is_q:
         preamble = (
             f"{role_line}"
             "You are participating in a structured multi-model debate with other AI reviewers. "
@@ -158,8 +335,15 @@ def _build_round0_prompt(content: str, claim: str, role_desc: str | None = None)
             "or UNCERTAIN. Then explain your key reasoning. Be concise and specific."
         )
 
+    bubble_instruction = (
+        "\n\nFinally, at the very end of your response on separate lines, write exactly 3 BUBBLE lines — "
+        "your 3 sharpest distinct points, each 8 words or fewer, plain English, no verdict tokens, no markdown:\n"
+        "BUBBLE: <point 1>\n"
+        "BUBBLE: <point 2>\n"
+        "BUBBLE: <point 3>"
+    )
     context_block = f"Context:\n{content}\n\n" if content else ""
-    return f"{preamble}\n\n{context_block}Question: \"{claim}\"\n\n{verdict_instruction}"
+    return f"{preamble}\n\n{context_block}Question: \"{claim}\"\n\n{verdict_instruction}{bubble_instruction}"
 
 
 def _build_followup_prompt(
@@ -167,36 +351,69 @@ def _build_followup_prompt(
     own_response: str,
     others: list[tuple[str, str, str | None]],
     own_role_desc: str | None = None,
+    domain: str = "technical",
 ) -> str:
     role_reminder = f"Remember your role: {own_role_desc}\n\n" if own_role_desc else ""
 
+    if domain == "business":
+        anti_groupthink = (
+            "CRITICAL: Do NOT change your position just because other advisors disagree. "
+            "Only change if they present NEW MARKET DATA or identify a SPECIFIC FLAW in your analysis. "
+            "Headcount is not due diligence — 4 optimistic advisors don't outweigh 1 advisor with real data. "
+            "A skeptical investor's critique backed by numbers carries more weight than polite agreement. "
+            "If you have concrete evidence that contradicts the majority, HOLD YOUR GROUND.\n\n"
+        )
+        conclude = (
+            "\nCritically evaluate the other advisors' arguments. Consider their specializations — "
+            "a fact_checker citing market data carries different weight than a devils_advocate pushing back. "
+            "If you disagree, identify the specific flaw in their reasoning with numbers. "
+            "If you agree, stress-test the consensus — what would make this wrong? "
+            "If new evidence changed your mind, say exactly what and why.\n"
+            "Write in plain prose. Do NOT start with a title, header, or verdict token. "
+            "Start directly with your strongest substantive point as a sentence.\n"
+            "End with: Verdict: PROCEED or Verdict: PROCEED_WITH_CONDITIONS or Verdict: DO_NOT_PROCEED"
+        )
+    else:
+        anti_groupthink = (
+            "CRITICAL: Do NOT change your position just because other reviewers disagree. "
+            "Only change if they present NEW EVIDENCE or identify a SPECIFIC FLAW in your reasoning. "
+            "Headcount is not evidence — 4 wrong reviewers don't outweigh 1 right one. "
+            "If you have concrete evidence (especially from web search, documentation, or direct knowledge) "
+            "that contradicts the majority, HOLD YOUR GROUND and explain why your evidence is stronger. "
+            "Consensus without new evidence is groupthink, not truth.\n\n"
+        )
+        conclude = (
+            "\nCritically evaluate the other reviewers' arguments. Consider their roles — "
+            "a fact_checker citing sources carries different weight than a devils_advocate pushing back. "
+            "If you disagree, identify the specific flaw in their reasoning. "
+            "If you agree, stress-test the consensus by stating the strongest counter-argument. "
+            "If new evidence changed your mind, say exactly what and why. "
+            "Conclude with your updated verdict: PASS, FAIL, or UNCERTAIN."
+        )
+
+    bubble_instruction = (
+        "\n\nFinally, at the very end of your response on separate lines, write exactly 3 BUBBLE lines — "
+        "your 3 sharpest distinct rebuttals or insights, each 8 words or fewer, plain English, no verdict tokens:\n"
+        "BUBBLE: <point 1>\n"
+        "BUBBLE: <point 2>\n"
+        "BUBBLE: <point 3>"
+    )
     parts = [
         f"{role_reminder}"
-        "You are in a structured multi-model debate. "
-        "You gave an initial assessment and other reviewers have now weighed in. "
+        "You are in a structured multi-advisor debate. "
+        "You gave an initial assessment and other advisors have now weighed in. "
         "Your goal is to converge on the truth, not to win the argument.\n\n"
-        "CRITICAL: Do NOT change your position just because other reviewers disagree. "
-        "Only change if they present NEW EVIDENCE or identify a SPECIFIC FLAW in your reasoning. "
-        "Headcount is not evidence — 4 wrong reviewers don't outweigh 1 right one. "
-        "If you have concrete evidence (especially from web search, documentation, or direct knowledge) "
-        "that contradicts the majority, HOLD YOUR GROUND and explain why your evidence is stronger. "
-        "Consensus without new evidence is groupthink, not truth.\n\n"
+        f"{anti_groupthink}"
+        "IMPORTANT: Refer to other advisors by their role title only (e.g. 'the Risk Hunter', 'the Strategist'). "
+        "Never mention model names like 'claude', 'gemini', 'gpt', 'deepseek', or 'sonar'.\n\n"
         "You already have the full content from the previous round — focus on the arguments.",
-        f'\nClaim: "{claim}"',
+        f'\nDecision: "{claim}"',
         f"\nYour previous response:\n{own_response}",
-        "\nOther reviewers said:",
+        "\nOther advisors said:",
     ]
     for name, resp, role in others:
-        role_tag = f" ({role})" if role else ""
-        parts.append(f"[{name}{role_tag}]: {resp}")
-    parts.append(
-        "\nCritically evaluate the other reviewers' arguments. Consider their roles — "
-        "a fact_checker citing sources carries different weight than a devils_advocate pushing back. "
-        "If you disagree, identify the specific flaw in their reasoning. "
-        "If you agree, stress-test the consensus by stating the strongest counter-argument. "
-        "If new evidence changed your mind, say exactly what and why. "
-        "Conclude with your updated verdict: PASS, FAIL, or UNCERTAIN."
-    )
+        parts.append(f"[{name}]: {resp}")
+    parts.append(conclude + bubble_instruction)
     return "\n".join(parts)
 
 
@@ -208,6 +425,8 @@ _ROLE_WEIGHTS = {
     "logic_checker": 1.2,
     "fact_checker": 1.3,
     "pragmatist": 1.0,
+    "strategist": 1.1,
+    "assumption_checker": 1.2,
 }
 
 
@@ -265,17 +484,20 @@ def _cap_content_for_model(content: str, model: str, max_output_tokens: int) -> 
     return content[:max_chars] + f"\n[... content truncated to fit {model} context window]"
 
 
-async def _run_round0(debaters, content, claim, debater_roles, debater_tokens, timeout):
+async def _run_round0(debaters, content, claim, debater_roles, debater_tokens, timeout, domain="technical"):
     """Run initial round — all models in parallel with role-specific prompts."""
+    roles_dict = get_roles(domain)
+
     def get_role_desc(model):
         role_key = debater_roles.get(model)
-        return ROLES[role_key][0] if role_key and role_key in ROLES else None
+        return roles_dict[role_key][0] if role_key and role_key in roles_dict else None
 
     results = await asyncio.gather(
         *[call_model(
             m,
             [{"role": "user", "content": _build_round0_prompt(
-                _cap_content_for_model(content, m, debater_tokens), claim, get_role_desc(m)
+                _cap_content_for_model(content, m, debater_tokens), claim, get_role_desc(m),
+                domain=domain,
             )}],
             max_tokens=debater_tokens,
             timeout=timeout,
@@ -303,17 +525,24 @@ async def _run_round0(debaters, content, claim, debater_roles, debater_tokens, t
 
 async def _run_followup_round(
     round_num, valid_models, transcript, claim, debater_roles, debater_tokens, timeout, get_role_desc,
+    domain="technical",
 ):
     """Run a cross-examination round — models see each other's previous responses."""
     tasks = []
     for model in valid_models:
         own = next(e["response"] for e in reversed(transcript) if e["model"] == model)
         others = [
-            (e["model"], e["response"], debater_roles.get(e["model"]))
+            (
+                _BUSINESS_ADVISOR_TITLES.get(debater_roles.get(e["model"], ""), debater_roles.get(e["model"], e["model"]))
+                if domain == "business"
+                else debater_roles.get(e["model"], e["model"]),
+                e["response"],
+                debater_roles.get(e["model"]),
+            )
             for e in transcript
             if e["round"] == round_num - 1 and e["model"] != model
         ]
-        prompt = _build_followup_prompt(claim, own, others, get_role_desc(model))
+        prompt = _build_followup_prompt(claim, own, others, get_role_desc(model), domain=domain)
         tasks.append(
             call_model(model, [{"role": "user", "content": prompt}],
                        max_tokens=debater_tokens, timeout=timeout)
@@ -339,7 +568,10 @@ async def _run_followup_round(
     return round_valid, round_entries
 
 
-async def _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status):
+async def _run_judge(
+    judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status,
+    domain="technical", model_titles=None,
+):
     """Run judge with retry on primary, then fallback chain."""
     FALLBACK_JUDGES = ["o4-mini", "claude-sonnet-4-6", "gpt-4.1"]
     judge_timeout = max(timeout, 90)
@@ -353,7 +585,7 @@ async def _run_judge(judge_model, content, claim, transcript, timeout, debater_r
         try:
             result, judge_usage = await run_judge(
                 attempt_judge, content, claim, transcript, judge_timeout,
-                model_roles=debater_roles,
+                model_roles=debater_roles, domain=domain, model_titles=model_titles,
             )
             track_usage(attempt_judge, judge_usage)
             if attempt_judge != judge_model:
@@ -394,16 +626,23 @@ async def run_debate(
     files: list | None = None,
     verbose: bool = False,
     status_callback=None,
+    stream_callback=None,
 ) -> dict:
-    """Orchestrate a multi-model debate and return the verdict."""
+    """Orchestrate a multi-model debate and return the verdict.
+
+    stream_callback: optional async callable receiving JSON-serializable dicts
+    for rich UI (narration, per-advisor excerpts). When set, status lines are
+    sent as {"type": "status", "message": "..."} instead of using status_callback.
+    """
     cfg = MODELS[mode]
+    domain = cfg.get("domain", "technical")
     debater_configs = cfg["debaters"]
     debaters = [d["model"] for d in debater_configs]
     debater_roles = {d["model"]: d.get("role") for d in debater_configs}
     judge_model = cfg["judge"]
     num_rounds = cfg["rounds"]
-    timeout = timeout_override or TIMEOUTS[mode]
-    debater_tokens = DEBATER_MAX_TOKENS.get(mode, 4096)
+    timeout = timeout_override or TIMEOUTS.get(mode, TIMEOUTS.get("verdh", 120))
+    debater_tokens = DEBATER_MAX_TOKENS.get(mode, DEBATER_MAX_TOKENS.get("verdh", 8192))
     transcript: list[dict] = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0}
     total_cost = 0.0
@@ -412,8 +651,14 @@ async def run_debate(
     def status(msg):
         if status_display:
             status_display.update(msg)
-        if status_callback:
+        if stream_callback:
+            asyncio.ensure_future(stream_callback({"type": "status", "message": msg}))
+        elif status_callback:
             asyncio.ensure_future(status_callback(msg))
+
+    def emit_stream(payload: dict):
+        if stream_callback:
+            asyncio.ensure_future(stream_callback(payload))
 
     def track_usage(model, usage):
         for k in total_usage:
@@ -427,12 +672,31 @@ async def run_debate(
         content = files_to_content(selected)
 
     # Round 0
-    status(f"spawning {len(debaters)} models: {' + '.join(debaters)}")
-    valid, get_role_desc = await _run_round0(debaters, content, claim, debater_roles, debater_tokens, timeout)
+    advisor_label = "advisors" if domain == "business" else "models"
+    if stream_callback:
+        if domain == "business":
+            emit_stream(
+                {
+                    "type": "narration",
+                    "text": "The council is reading your brief. Each advisor forms an independent opening position — no one sees the others’ answers yet.",
+                }
+            )
+        else:
+            emit_stream(
+                {
+                    "type": "narration",
+                    "text": "Reviewers are analyzing the question in parallel before cross-examination.",
+                }
+            )
+    status(f"spawning {len(debaters)} {advisor_label}: {' + '.join(debaters)}")
+    valid, get_role_desc = await _run_round0(
+        debaters, content, claim, debater_roles, debater_tokens, timeout, domain=domain,
+    )
 
     for model, (response, usage) in valid:
         transcript.append({"round": 0, "model": model, "role": debater_roles.get(model), "response": response})
         track_usage(model, usage)
+        emit_stream(_advisor_stream_payload(debater_roles.get(model), model, 0, response, domain))
 
     valid_models = [m for m, _ in valid]
 
@@ -441,20 +705,44 @@ async def run_debate(
             status_display.pause()
         print_round(0, [e for e in transcript if e["round"] == 0])
 
-    status(f"{len(valid)} models responded, initial positions locked in")
+    status(f"{len(valid)} {advisor_label} responded, initial positions locked in")
+    if stream_callback and domain == "business":
+        emit_stream(
+            {
+                "type": "narration",
+                "text": "Opening statements are on the record. The next rounds are adversarial — advisors read each other’s arguments and respond.",
+            }
+        )
 
     # Follow-up rounds
-    round_labels = ["models challenging each other", "pressure-testing arguments", "final rebuttals"]
+    round_labels = (
+        ["advisors challenging each other", "pressure-testing assumptions", "final positions"]
+        if domain == "business"
+        else ["models challenging each other", "pressure-testing arguments", "final rebuttals"]
+    )
     for round_num in range(1, num_rounds):
         label = round_labels[min(round_num - 1, len(round_labels) - 1)]
-        status(f"round {round_num + 1}/{num_rounds + 1} — {label}")
+        if stream_callback:
+            emit_stream(
+                {
+                    "type": "narration",
+                    "text": f"Round {round_num + 1} of {num_rounds}: {label.replace('—', ' — ')}.",
+                }
+            )
+        status(f"round {round_num + 1}/{num_rounds} — {label}")
 
         round_valid, round_entries = await _run_followup_round(
             round_num, valid_models, transcript, claim, debater_roles, debater_tokens, timeout, get_role_desc,
+            domain=domain,
         )
 
         for entry in round_entries:
             transcript.append(entry)
+            emit_stream(
+                _advisor_stream_payload(
+                    entry.get("role"), entry["model"], round_num, entry["response"], domain
+                )
+            )
         for m, usage in round_valid:
             track_usage(m, usage)
 
@@ -469,7 +757,25 @@ async def run_debate(
             print_round(round_num, round_entries)
 
     # Judge
-    result = await _run_judge(judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status)
+    if stream_callback:
+        emit_stream(
+            {
+                "type": "narration",
+                "text": "Live debate closed. The chair is synthesizing a verdict from the full transcript.",
+            }
+        )
+    # Build model_titles before judge so judge can use them in transcript/prompts
+    model_titles: dict[str, str] | None = None
+    if domain == "business":
+        model_titles = {
+            m: _BUSINESS_ADVISOR_TITLES.get(debater_roles.get(m, ""), m)
+            for m in debater_roles
+        }
+
+    result = await _run_judge(
+        judge_model, content, claim, transcript, timeout, debater_roles, track_usage, status,
+        domain=domain, model_titles=model_titles,
+    )
 
     # Confidence from vote math
     result["confidence"] = _calculate_confidence(result, debater_roles)
@@ -477,9 +783,15 @@ async def run_debate(
     # Metadata
     result["elapsed"] = round(time.time() - start, 1)
     result["mode"] = mode
+    result["domain"] = domain
     result["models_used"] = valid_models
     result["judge"] = judge_model
     result["transcript"] = transcript
     result["usage"] = total_usage
     result["cost"] = round(total_cost, 4)
+    # Expose model_titles for UI display
+    if model_titles:
+        result["model_titles"] = model_titles
+    else:
+        result["model_titles"] = {m: role for m, role in debater_roles.items()}
     return result
